@@ -38,6 +38,16 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [panels, setPanels] = useState<any[]>([
+    { id: 'p1', type: 'Group', viewId: 'g1', x: 20, y: 20, w: 800, h: 350, z: 10 },
+  ]);
+
+  const resetUIState = () => {
+    setActiveTab('dashboard');
+    setPanels([{ id: 'p1', type: 'Group', viewId: 'g1', x: 20, y: 20, w: 800, h: 350, z: 10 }]);
+    setIsRoomToolOpen(false);
+  };
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRoomToolOpen, setIsRoomToolOpen] = useState(false);
   const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(!!supabase);
@@ -144,9 +154,6 @@ const App: React.FC = () => {
   const [selectedEntry, setSelectedEntry] = useState<ScheduleEntry | null>(null);
   const [selectedCellEntries, setSelectedCellEntries] = useState<ScheduleEntry[]>([]);
 
-  const [panels, setPanels] = useState<any[]>([
-    { id: 'p1', type: 'Group', viewId: 'g1', x: 20, y: 20, w: 800, h: 350, z: 10 },
-  ]);
   const [maxZ, setMaxZ] = useState(12);
 
   const handleSaveSession = async (newEntries: Omit<ScheduleEntry, 'id' | 'departmentId'>[]) => {
@@ -466,7 +473,19 @@ const App: React.FC = () => {
   const updatePanel = (id: string, updates: any) => {
     setPanels(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
   };
-  if (!currentUser) return <Login onLogin={setCurrentUser} users={users} />;
+
+  // Guard: If activeTab is restricted but user isn't authorized, redirect to dashboard
+  useEffect(() => {
+    if (!currentUser) return;
+    const restrictedTabs = ['admin', 'data', 'terms'];
+    if (restrictedTabs.includes(activeTab)) {
+      if (activeTab === 'admin' && currentUser.role !== Role.SUPER_ADMIN) setActiveTab('dashboard');
+      if (activeTab === 'data' && currentUser.role === Role.VIEWER) setActiveTab('dashboard');
+      if (activeTab === 'terms' && currentUser.role === Role.VIEWER) setActiveTab('dashboard');
+    }
+  }, [activeTab, currentUser]);
+
+  if (!currentUser) return <Login onLogin={(user) => { setCurrentUser(user); resetUIState(); }} users={users} />;
   
   if (!isSupabaseConfigured) {
     return <SupabaseSetup onConfigured={() => {
@@ -485,7 +504,7 @@ const App: React.FC = () => {
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         currentUser={currentUser}
-        onLogout={() => setCurrentUser(null)}
+        onLogout={() => { setCurrentUser(null); resetUIState(); }}
         isSupabaseConnected={isSupabaseConfigured}
         activeTermName={effectiveActiveTerm?.name}
         onAddPanel={addPanel}
@@ -554,9 +573,9 @@ const App: React.FC = () => {
             </div>
           )}
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} />}
-          {activeTab === 'terms' && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
-          {activeTab === 'data' && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} />}
-          {activeTab === 'admin' && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} />}
+          {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
+          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} />}
+          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} />}
         </div>
       </main>
 
