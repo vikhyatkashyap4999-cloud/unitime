@@ -113,9 +113,10 @@ export class DataService {
     const loadTracker = new Map<string, number>(); // key: week-facultyId, value: totalHours
 
     for (const entry of schedule) {
+      const weeks = entry.weeks || [];
       const duration = this.getDuration(entry.startTime, entry.endTime);
       
-      for (const week of entry.weeks) {
+      for (const week of weeks) {
         const baseKey = `${week}-${entry.day}-${entry.startTime}`;
         
         // Overlap Conflicts (Same time, same resource)
@@ -133,7 +134,8 @@ export class DataService {
           facultyMap.set(facultyKey, entry.id);
         }
 
-        for (const gId of entry.groupIds) {
+        const groupIds = entry.groupIds || [];
+        for (const gId of groupIds) {
           const groupKey = `${baseKey}-group-${gId}`;
           if (groupMap.has(groupKey)) {
             clashes.push({ type: 'Group', message: `Group Conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, groupMap.get(groupKey)!] });
@@ -158,7 +160,7 @@ export class DataService {
           clashes.push({
             type: 'LoadViolation',
             message: `${faculty.name} is over capacity in Week ${week} (${hours.toFixed(1)}h / ${faculty.maxHoursPerWeek}h limit)`,
-            affectedIds: schedule.filter(s => s.facultyId === fId && s.weeks.includes(Number(week))).map(s => s.id)
+            affectedIds: schedule.filter(s => s.facultyId === fId && (s.weeks || []).includes(Number(week))).map(s => s.id)
           });
         }
       });

@@ -38,12 +38,20 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [panels, setPanels] = useState<any[]>([
+    { id: 'p1', type: 'Group', viewId: '', x: 20, y: 20, w: 800, h: 350, z: 10 },
+  ]);
+
+  const resetUIState = () => {
+    setActiveTab('dashboard');
+    setPanels([{ id: 'p1', type: 'Group', viewId: '', x: 20, y: 20, w: 800, h: 350, z: 10 }]);
+    setIsRoomToolOpen(false);
+  };
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRoomToolOpen, setIsRoomToolOpen] = useState(false);
   const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(!!supabase);
 
-  const [builderViewType, setBuilderViewType] = useState<ViewType>('Group');
-  const [builderViewId, setBuilderViewId] = useState<string>('g1');
 
   const [viewingTermId, setViewingTermId] = useState<string | null>(null);
 
@@ -55,7 +63,8 @@ const App: React.FC = () => {
   const [groups, setGroups] = useState<StudentGroup[]>(MOCK_GROUPS);
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
   const [clashes, setClashes] = useState<Clash[]>([]);
-  
+  const [maximizedPanelId, setMaximizedPanelId] = useState<string | null>(null);
+
   // Clipboard for copy-paste
   const [clipboard, setClipboard] = useState<Partial<ScheduleEntry> | null>(null);
 
@@ -144,9 +153,6 @@ const App: React.FC = () => {
   const [selectedEntry, setSelectedEntry] = useState<ScheduleEntry | null>(null);
   const [selectedCellEntries, setSelectedCellEntries] = useState<ScheduleEntry[]>([]);
 
-  const [panels, setPanels] = useState<any[]>([
-    { id: 'p1', type: 'Group', viewId: 'g1', x: 20, y: 20, w: 800, h: 350, z: 10 },
-  ]);
   const [maxZ, setMaxZ] = useState(12);
 
   const handleSaveSession = async (newEntries: Omit<ScheduleEntry, 'id' | 'departmentId'>[]) => {
@@ -379,10 +385,10 @@ const App: React.FC = () => {
   const handleAutoTile = () => {
     // Create 4 panels with different view types, sized to fit the grid perfectly
     const newPanels = [
-      { id: 'p1', type: 'Group' as ViewType, viewId: groups[0]?.id || '', x: 10, y: 10, w: 800, h: 350, z: 1 },
-      { id: 'p2', type: 'Room' as ViewType, viewId: rooms[0]?.id || '', x: 820, y: 10, w: 800, h: 350, z: 2 },
-      { id: 'p3', type: 'Faculty' as ViewType, viewId: faculties[0]?.id || '', x: 10, y: 370, w: 800, h: 350, z: 3 },
-      { id: 'p4', type: 'Course' as ViewType, viewId: courses[0]?.id || '', x: 820, y: 370, w: 800, h: 350, z: 4 },
+      { id: 'p1', type: 'Group' as ViewType, viewId: '', x: 10, y: 10, w: 800, h: 350, z: 1 },
+      { id: 'p2', type: 'Room' as ViewType, viewId: '', x: 820, y: 10, w: 800, h: 350, z: 2 },
+      { id: 'p3', type: 'Faculty' as ViewType, viewId: '', x: 10, y: 370, w: 800, h: 350, z: 3 },
+      { id: 'p4', type: 'Course' as ViewType, viewId: '', x: 820, y: 370, w: 800, h: 350, z: 4 },
     ];
     setPanels(newPanels);
     setMaxZ(4);
@@ -442,10 +448,7 @@ const App: React.FC = () => {
       let defaultViewId = viewId;
       
       if (!defaultViewId) {
-        if (type === 'Room') defaultViewId = rooms[0]?.id || '';
-        if (type === 'Faculty') defaultViewId = faculties[0]?.id || '';
-        if (type === 'Group') defaultViewId = groups[0]?.id || '';
-        if (type === 'Course') defaultViewId = courses[0]?.id || '';
+        defaultViewId = '';
       }
 
       setPanels([...panels, { 
@@ -466,7 +469,19 @@ const App: React.FC = () => {
   const updatePanel = (id: string, updates: any) => {
     setPanels(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
   };
-  if (!currentUser) return <Login onLogin={setCurrentUser} users={users} />;
+
+  // Guard: If activeTab is restricted but user isn't authorized, redirect to dashboard
+  useEffect(() => {
+    if (!currentUser) return;
+    const restrictedTabs = ['admin', 'data', 'terms'];
+    if (restrictedTabs.includes(activeTab)) {
+      if (activeTab === 'admin' && currentUser.role !== Role.SUPER_ADMIN) setActiveTab('dashboard');
+      if (activeTab === 'data' && currentUser.role === Role.VIEWER) setActiveTab('dashboard');
+      if (activeTab === 'terms' && currentUser.role === Role.VIEWER) setActiveTab('dashboard');
+    }
+  }, [activeTab, currentUser]);
+
+  if (!currentUser) return <Login onLogin={(user) => { setCurrentUser(user); resetUIState(); }} users={users} />;
   
   if (!isSupabaseConfigured) {
     return <SupabaseSetup onConfigured={() => {
@@ -485,7 +500,7 @@ const App: React.FC = () => {
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         currentUser={currentUser}
-        onLogout={() => setCurrentUser(null)}
+        onLogout={() => { setCurrentUser(null); resetUIState(); }}
         isSupabaseConnected={isSupabaseConfigured}
         activeTermName={effectiveActiveTerm?.name}
         onAddPanel={addPanel}
@@ -499,64 +514,68 @@ const App: React.FC = () => {
         <div className="h-full w-full overflow-auto custom-scrollbar">
           {activeTab === 'dashboard' && <Dashboard courses={courses} rooms={rooms} groups={groups} schedule={schedule} clashes={clashes} activeTerm={effectiveActiveTerm} faculties={faculties} />}
           {activeTab === 'builder' && (
-            <div className="flex flex-col h-full">
-              <div className="flex-1 relative overflow-auto bg-slate-200/30 shadow-inner custom-scrollbar">
+            <div className="flex flex-col h-full bg-slate-200/30">
+              <div className="flex-1 relative overflow-auto shadow-inner custom-scrollbar">
                 <div className="min-w-[2500px] min-h-[1500px] relative">
-                  {panels.map((panel) => (
-                    <TimetablePanel 
-                      key={panel.id} 
-                      id={panel.id} 
-                      viewType={panel.type} 
-                      viewId={panel.viewId} 
-                      activeTermId={effectiveActiveTerm?.id}
-                      entries={schedule} 
-                      rooms={rooms} 
-                      faculties={faculties} 
-                      groups={groups} 
-                      courses={courses} 
-                      x={panel.x} 
-                      y={panel.y} 
-                      w={panel.w} 
-                      h={panel.h} 
-                      z={panel.z} 
-                      onRemove={() => setPanels(panels.filter(p => p.id !== panel.id))} 
-                      onUpdateView={(type, viewId) => updatePanel(panel.id, { type, viewId })} 
-                      onUpdateGeometry={(geom) => updatePanel(panel.id, geom)} 
-                      onFocus={() => {
-                        const newZ = maxZ + 1;
-                        setMaxZ(newZ);
-                        updatePanel(panel.id, { z: newZ });
-                      }} 
-                      onCellClick={(day, time, viewType, viewId) => {
-                        const initial: Partial<ScheduleEntry> = { day, startTime: time };
-                        if (viewType === 'Room') initial.roomId = viewId;
-                        if (viewType === 'Faculty') initial.facultyId = viewId;
-                        if (viewType === 'Group') initial.groupIds = [viewId];
-                        if (viewType === 'Course') initial.courseId = viewId;
-                        setModalInitialData(initial);
-                        setIsModalOpen(true);
-                      }} 
-                      onEntryClick={(entry, cellEntries) => { 
-                        setSelectedEntry(entry); 
-                        setSelectedCellEntries(cellEntries || [entry]);
-                        setIsDetailModalOpen(true); 
-                      }}
-                      onMoveEntry={handleMoveSession}
-                      onDuplicateEntry={handleDuplicateSession}
-                      onDeleteEntry={handleDeleteSession}
-                      onPasteEntry={(entry) => handleSaveSession([entry])}
-                      clipboard={clipboard}
-                      setClipboard={setClipboard}
-                    />
-                  ))}
+                  <AnimatePresence>
+                    {panels.map((panel) => (
+                      <TimetablePanel 
+                        key={panel.id} 
+                        id={panel.id} 
+                        viewType={panel.type} 
+                        viewId={panel.viewId} 
+                        activeTermId={effectiveActiveTerm?.id}
+                        entries={schedule} 
+                        rooms={rooms} 
+                        faculties={faculties} 
+                        groups={groups} 
+                        courses={courses} 
+                        x={panel.x} 
+                        y={panel.y} 
+                        w={panel.w} 
+                        h={panel.h} 
+                        z={panel.z} 
+                        onRemove={() => setPanels(panels.filter(p => p.id !== panel.id))} 
+                        onUpdateView={(type, viewId) => updatePanel(panel.id, { type, viewId })} 
+                        onUpdateGeometry={(geom) => updatePanel(panel.id, geom)} 
+                        onFocus={() => {
+                          const newZ = maxZ + 1;
+                          setMaxZ(newZ);
+                          updatePanel(panel.id, { z: newZ });
+                        }} 
+                        onCellClick={(day, time, viewType, viewId) => {
+                          const initial: Partial<ScheduleEntry> = { day, startTime: time };
+                          if (viewType === 'Room') initial.roomId = viewId;
+                          if (viewType === 'Faculty') initial.facultyId = viewId;
+                          if (viewType === 'Group') initial.groupIds = [viewId];
+                          if (viewType === 'Course') initial.courseId = viewId;
+                          setModalInitialData(initial);
+                          setIsModalOpen(true);
+                        }} 
+                        onEntryClick={(entry, cellEntries) => { 
+                          setSelectedEntry(entry); 
+                          setSelectedCellEntries(cellEntries || [entry]);
+                          setIsDetailModalOpen(true); 
+                        }}
+                        onMoveEntry={handleMoveSession}
+                        onDuplicateEntry={handleDuplicateSession}
+                        onDeleteEntry={handleDeleteSession}
+                        onPasteEntry={(entry) => handleSaveSession([entry])}
+                        isMaximized={maximizedPanelId === panel.id}
+                        onMaximize={() => setMaximizedPanelId(maximizedPanelId === panel.id ? null : panel.id)}
+                        clipboard={clipboard}
+                        setClipboard={setClipboard}
+                      />
+                    ))}
+                  </AnimatePresence>
                 </div>
               </div>
             </div>
           )}
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} />}
-          {activeTab === 'terms' && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
-          {activeTab === 'data' && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} />}
-          {activeTab === 'admin' && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} />}
+          {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
+          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} />}
+          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} />}
         </div>
       </main>
 
@@ -599,7 +618,7 @@ const App: React.FC = () => {
         rooms={rooms} 
         groups={groups} 
       />
-      <RoomAvailabilityTool isOpen={isRoomToolOpen} onClose={() => setIsRoomToolOpen(false)} rooms={rooms} schedule={schedule} />
+      <RoomAvailabilityTool isOpen={isRoomToolOpen} onClose={() => setIsRoomToolOpen(false)} rooms={rooms} schedule={schedule} groups={groups} />
     </div>
   );
 };

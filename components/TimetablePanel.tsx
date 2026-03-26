@@ -2,8 +2,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { DAYS, TIME_SLOTS, TOTAL_WEEKS } from '../constants';
 import { ScheduleEntry, ViewType, Room, Faculty, StudentGroup, Course, DayOfWeek } from '../types';
-import { Minus, Square, X, FolderSync, CalendarCheck, AlertTriangle, Search, ChevronDown, Plus, Calendar, Clock, Zap } from 'lucide-react';
+import { Minus, Square, X, FolderSync, CalendarCheck, AlertTriangle, Search, ChevronDown, Plus, Calendar, Clock, Zap, Users, User, MapPin } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { formatTime12h } from '../services/utils';
 
 const getDayDate = (dayIndex: number, week: number) => {
   const startDate = new Date('2024-09-02');
@@ -39,6 +40,8 @@ interface TimetablePanelProps {
   onPasteEntry?: (entry: Omit<ScheduleEntry, 'id' | 'departmentId'>) => void;
   clipboard: Partial<ScheduleEntry> | null;
   setClipboard: (entry: Partial<ScheduleEntry> | null) => void;
+  isMaximized?: boolean;
+  onMaximize?: () => void;
   isMobile?: boolean;
   activeTermId?: string;
 }
@@ -46,7 +49,8 @@ interface TimetablePanelProps {
 const TimetablePanel: React.FC<TimetablePanelProps> = ({ 
   viewType, viewId, entries, rooms, faculties, groups, courses, x, y, w, h, z,
   onRemove, onUpdateView, onUpdateGeometry, onFocus, onCellClick, onEntryClick, 
-  onMoveEntry, onDuplicateEntry, onDeleteEntry, onPasteEntry, clipboard, setClipboard, isMobile = false, activeTermId
+  onMoveEntry, onDuplicateEntry, onDeleteEntry, onPasteEntry, clipboard, setClipboard, 
+  isMaximized = false, onMaximize, isMobile = false, activeTermId
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [resizeDir, setResizeDir] = useState<string | null>(null);
@@ -99,10 +103,10 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
       const matchesTarget = 
         (viewType === 'Room' && e.roomId === viewId) ||
         (viewType === 'Faculty' && e.facultyId === viewId) ||
-        (viewType === 'Group' && e.groupIds.includes(viewId)) ||
+        (viewType === 'Group' && e.groupIds?.includes(viewId)) ||
         (viewType === 'Course' && e.courseId === viewId);
       
-      const matchesWeek = e.weeks.some(w => selectedWeeks.includes(w));
+      const matchesWeek = e.weeks?.some(w => selectedWeeks.includes(w));
       return matchesTarget && matchesWeek;
     });
   }, [entries, viewType, viewId, selectedWeeks, activeTermId]);
@@ -117,7 +121,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (isMobile) return;
+    if (isMobile || isMaximized) return;
     onFocus?.();
     setIsDragging(true);
     dragStart.current = { x: e.clientX, y: e.clientY, startX: x, startY: y };
@@ -125,7 +129,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
   };
 
   const handleResizeStart = (e: React.MouseEvent, dir: string) => {
-    if (isMobile) return;
+    if (isMobile || isMaximized) return;
     onFocus?.();
     setResizeDir(dir);
     resizeStart.current = { 
@@ -210,6 +214,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
 
   const handleContextMenu = (e: React.MouseEvent, entry: ScheduleEntry) => {
     e.preventDefault();
+    e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY, entry });
   };
 
@@ -241,9 +246,11 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
     }
   };
 
-  const panelStyles: React.CSSProperties = isMobile 
-    ? { width: '100%', height: '100%', position: 'relative', border: 'none', boxShadow: 'none', borderRadius: 0 } 
-    : { left: x, top: y, width: w, height: h, zIndex: z, position: 'absolute' };
+  const panelStyles: React.CSSProperties = isMaximized
+    ? { position: 'fixed', inset: 0, zIndex: 9999, width: '100vw', height: '100vh', border: 'none', boxShadow: 'none', borderRadius: 0 }
+    : isMobile 
+      ? { width: '100%', height: '100%', position: 'relative', border: 'none', boxShadow: 'none', borderRadius: 0 } 
+      : { left: x, top: y, width: w, height: h, zIndex: z, position: 'absolute' };
 
   return (
     <div 
@@ -254,6 +261,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
       {/* Classic Title Bar */}
       <div 
         onMouseDown={handleMouseDown} 
+        onDoubleClick={(e) => { e.stopPropagation(); onMaximize?.(); }}
         className={`px-3 py-1.5 flex items-center justify-between cursor-move active:cursor-grabbing border-b border-[#ccc] bg-[#185baf] text-white ${isMobile ? 'cursor-default' : ''}`}
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -285,7 +293,10 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
             
             <div className="relative flex-1 max-w-[200px]" ref={selectorRef} onMouseDown={e => e.stopPropagation()}>
               <button 
-                onClick={() => setIsSelectorOpen(!isSelectorOpen)} 
+                onClick={() => {
+                  setIsSelectorOpen(!isSelectorOpen);
+                  if (!isSelectorOpen) setSearchQuery(''); // Clear search when opening
+                }} 
                 className="w-full bg-white text-black border border-[#ccc] px-2 py-0.5 text-xs font-bold hover:bg-[#e6e6e6] transition-all flex justify-between items-center gap-2 max-h-[22px]"
               >
                 <span className="truncate">{activeObjectName || 'Select...'}</span>
@@ -293,29 +304,34 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
               </button>
               
               {isSelectorOpen && (
-                <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-[#ccc] shadow-lg z-50 overflow-hidden">
-                  <div className="p-2 border-b border-[#ccc] flex items-center gap-2 bg-[#f0f0f0]">
-                    <Search className="w-3.5 h-3.5 text-[#666]" />
+                <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-[#ccc] shadow-xl z-[9999] overflow-hidden">
+                  <div className="p-2 border-b border-[#ccc] flex items-center gap-2 bg-[#f8f9fa]">
+                    <Search className="w-3.5 h-3.5 text-[#999]" />
                     <input 
                       autoFocus 
                       type="text" 
                       placeholder={`Search ${viewType}...`} 
-                      className="w-full bg-white border border-[#ccc] px-2 py-1 outline-none text-xs font-bold text-black placeholder:text-[#999]" 
+                      autoComplete="off"
+                      className="w-full bg-white border border-[#ccc] px-2 py-1 outline-none text-xs font-bold text-[#333] placeholder:text-[#999]" 
                       value={searchQuery} 
                       onChange={(e) => setSearchQuery(e.target.value)} 
                     />
                   </div>
-                  <div className="max-h-60 overflow-y-auto p-1 text-black custom-scrollbar">
-                    {resourceOptions.length > 0 ? resourceOptions.map(opt => (
-                      <button 
-                        key={opt.id} 
-                        onClick={() => { onUpdateView?.(viewType, opt.id); setIsSelectorOpen(false); setSearchQuery(''); }} 
-                        className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-all ${viewId === opt.id ? 'bg-[#185baf] text-white' : 'hover:bg-[#e6e6e6] text-[#333]'}`}
-                      >
-                        {opt.name}
-                      </button>
-                    )) : (
-                      <div className="p-4 text-center text-xs text-[#999] uppercase tracking-widest">No results</div>
+                  <div className="max-h-72 overflow-y-auto p-1 text-black custom-scrollbar bg-white">
+                    {resourceOptions.length > 0 ? (
+                      resourceOptions.map(opt => (
+                        <button 
+                          key={opt.id} 
+                          onClick={() => { onUpdateView?.(viewType, opt.id); setIsSelectorOpen(false); setSearchQuery(''); }} 
+                          className={`w-full text-left px-3 py-2 text-xs font-bold transition-all border border-transparent mb-0.5 ${viewId === opt.id ? 'bg-[#185baf] text-white border-[#0d47a1]' : 'hover:bg-[#f0f0f0] hover:border-[#ccc] text-[#333]'}`}
+                        >
+                          {opt.name}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="p-4 text-center">
+                        <p className="text-xs font-bold text-[#999] uppercase tracking-widest">No {viewType}s Found</p>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -325,12 +341,20 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
         </div>
 
         {!isMobile && (
-          <div className="flex items-center gap-2 ml-4" onMouseDown={e => e.stopPropagation()}>
+          <div className="flex items-center gap-1.5 ml-4" onMouseDown={e => e.stopPropagation()}>
+            <button 
+              onClick={onMaximize}
+              title={isMaximized ? "Restore Size" : "Maximize View"}
+              className="p-1 hover:bg-white/20 transition-all rounded-sm border border-transparent hover:border-white/40"
+            >
+              <Square className={`w-3.5 h-3.5 ${isMaximized ? 'scale-75' : ''}`} />
+            </button>
+            <div className="w-px h-4 bg-white/20 mx-0.5" />
             <button 
               onClick={onRemove}
-              className="p-1 hover:bg-[#c9302c] bg-[#d9534f] text-white border border-transparent transition-all"
+              className="p-1 hover:bg-[#c9302c] transition-all rounded-sm flex items-center justify-center"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         )}
@@ -372,7 +396,19 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
       {/* Grid */}
       <div className="flex-1 bg-white relative overflow-hidden flex flex-col">
         <div className="absolute inset-0 overflow-auto custom-scrollbar bg-white">
-          <table className="w-full border-collapse table-fixed min-w-[800px]">
+          {!viewId ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white z-[100] p-12 text-center">
+               <div className="w-20 h-20 bg-[#f8fafc] rounded-none flex items-center justify-center mb-6 border-4 border-double border-[#185baf]/20 shadow-inner">
+                  <Search className="w-10 h-10 text-[#185baf]/40" />
+               </div>
+               <h3 className="text-lg font-black text-[#185baf] uppercase tracking-[0.2em]">Ready to Build</h3>
+               <div className="w-12 h-1 bg-[#185baf] my-4" />
+               <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest max-w-[250px] leading-relaxed">
+                 Select a {viewType} from the dropdown menu in the blue title bar above to start scheduling.
+               </p>
+            </div>
+          ) : (
+            <table className="w-full border-collapse table-fixed min-w-[800px]">
             <thead>
               <tr className="sticky top-0 z-40 shadow-[0_1px_0_#ccc]">
                 <th className="w-16 sticky left-0 z-50 bg-[#f0f0f0] border-b border-r border-[#ccc]"></th>
@@ -381,7 +417,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                     key={t} 
                     className={`h-8 text-[10px] font-bold text-[#666] uppercase tracking-widest border-b border-[#ccc] bg-[#fdfdfd] border-r border-r-[#f0f0f0] ${t.endsWith(':00') ? 'text-[#333]' : ''}`}
                   >
-                     {t.endsWith(':00') ? t.split(':')[0] : ''}
+                     {t.endsWith(':00') ? formatTime12h(t).split(' ')[0] : ''}
                   </th>
                 ))}
               </tr>
@@ -396,27 +432,25 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                   {TIME_SLOTS.map(time => {
                     const cellEntries = filteredEntries.filter(e => e.day === day && e.startTime === time);
                     const isCovered = filteredEntries.some(e => e.day === day && time > e.startTime && time < e.endTime);
-                    const hasConflict = cellEntries.length > 1;
 
                     return (
                       <td 
                         key={time} 
-                        onClick={() => !isCovered && cellEntries.length === 0 && onCellClick?.(day as DayOfWeek, time, viewType, viewId)} 
-                        onContextMenu={(e) => !isCovered && cellEntries.length === 0 && handleCellContextMenu(e, day as DayOfWeek, time)}
+                        onClick={() => !isCovered && onCellClick?.(day as DayOfWeek, time, viewType, viewId)} 
+                        onContextMenu={(e) => !isCovered && handleCellContextMenu(e, day as DayOfWeek, time)}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, day as DayOfWeek, time)}
-                        className={`relative h-14 border-r border-b border-[#eee] transition-colors ${isCovered ? 'bg-[#f5f5f5]' : 'hover:bg-[#e0ebf9] cursor-pointer group/cell'} ${time.endsWith(':30') ? 'border-r-[#e0e0e0]' : 'border-r-[#f0f0f0]'}`}
+                        className={`relative border-r border-b border-[#eee] transition-colors ${isMaximized ? 'h-32' : 'h-14'} ${isCovered ? 'bg-[#f5f5f5]' : 'hover:bg-[#e0ebf9] cursor-pointer group/cell'} ${time.endsWith(':30') ? 'border-r-[#e0e0e0]' : 'border-r-[#f0f0f0]'}`}
                       >
-                        {cellEntries.length === 0 && !isCovered && (
-                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/cell:opacity-100 transition-opacity">
-                            <Plus className="w-3 h-3 text-[#185baf]/40" />
+                        {!isCovered && (
+                          <div className="absolute top-1 right-1 z-50 opacity-0 group-hover/cell:opacity-100 transition-opacity">
+                            <Plus className="w-3.5 h-3.5 text-[#185baf] bg-white rounded-full shadow-md border border-[#185baf] p-0.5" />
                           </div>
                         )}
                         <div className={`absolute inset-y-[1px] left-[1px] z-10 pointer-events-none`} style={{ width: 'calc(100% - 2px)', height: 'calc(100% - 2px)' }}>
                           {cellEntries.map((entry, index) => {
                             const course = courses.find(c => c.id === entry.courseId);
                             const slots = getSlotCount(entry.startTime, entry.endTime);
-                            
                             const hasConflict = cellEntries.length > 1;
                             const cascadeX = index * 4;
                             const cascadeY = index * 4;
@@ -435,9 +469,9 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                                   backgroundColor: hasConflict ? '#ef4444' : '#185baf', 
                                   borderColor: hasConflict ? '#b91c1c' : '#00479b', 
                                   color: '#fff',
-                                  width: slots > 1 ? `calc(${slots * 100}% + ${(slots - 1) * 1}px - ${cascadeX}px)` : `calc(100% - ${cascadeX}px)`,
+                                  width: slots > 1 ? `calc(${slots * 100}% + ${(slots - 1) * 2}px - ${cascadeX}px)` : `calc(100% - ${cascadeX}px)`,
                                   height: `calc(100% - ${cascadeY}px)`,
-                                  zIndex: 20 + index,
+                                  zIndex: 20 + index
                                 }}
                               >
                                 {hasConflict && (
@@ -445,21 +479,40 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                                     {index + 1}
                                   </div>
                                 )}
-                                <div className="text-[9px] font-bold leading-none uppercase truncate tracking-tight pr-3">{course?.name}</div>
-                                <div className="text-[8px] font-normal opacity-90 truncate mt-0.5">{course?.code}</div>
+                                <div className={`${isMaximized ? 'text-[11px]' : 'text-[9px]'} font-bold leading-[1.1] uppercase truncate tracking-tight pr-3`}>{course?.name}</div>
+                                <div className={`${isMaximized ? 'text-[10px]' : 'text-[8px]'} font-normal opacity-90 truncate mt-0.5`}>{course?.code}</div>
                                 
-                                <div className="mt-auto flex justify-between items-end">
-                                  <span className="text-[8px] truncate max-w-[60%] opacity-90">
-                                    {viewType === 'Faculty' 
-                                      ? groups.filter(g => entry.groupIds?.includes(g.id)).map(g => g.name).join(', ')
-                                      : faculties.find(f => f.id === entry.facultyId)?.name}
-                                  </span>
-                                  <span className="text-[8px] font-bold bg-white/20 px-1 py-0.5 leading-none">
-                                    {viewType === 'Room' 
-                                      ? groups.filter(g => entry.groupIds?.includes(g.id)).map(g => g.name).join(', ')
-                                      : rooms.find(r => r.id === entry.roomId)?.name}
-                                  </span>
-                                </div>
+                                {isMaximized && (
+                                  <div className="mt-2 pt-2 border-t border-white/30 flex flex-col gap-1.5 overflow-hidden">
+                                     <div className="flex items-center gap-2 text-[10px] font-bold opacity-100 truncate">
+                                         <Users className="w-3.5 h-3.5 shrink-0" />
+                                         <span>{entry.groupIds?.map(id => groups.find(g => g.id === id)?.name).filter(Boolean).join(', ') || 'No Cohort'}</span>
+                                      </div>
+                                      <div className="flex items-center gap-2 text-[10px] font-bold opacity-100 truncate">
+                                         <User className="w-3.5 h-3.5 shrink-0" />
+                                         <span>{faculties.find(f => f.id === entry.facultyId)?.name || 'No Staff'}</span>
+                                      </div>
+                                      <div className="flex items-center gap-2 text-[10px] font-bold opacity-100 truncate">
+                                         <MapPin className="w-3.5 h-3.5 shrink-0" />
+                                         <span>{rooms.find(r => r.id === entry.roomId)?.name || 'No Room'}</span>
+                                      </div>
+                                  </div>
+                                )}
+
+                                {!isMaximized && (
+                                  <div className="mt-auto flex justify-between items-end">
+                                    <span className="text-[8px] truncate max-w-[60%] opacity-90 font-bold">
+                                      {viewType === 'Faculty' 
+                                        ? groups.filter(g => entry.groupIds?.includes(g.id)).map(g => g.name).join(', ')
+                                        : faculties.find(f => f.id === entry.facultyId)?.name || 'No Staff'}
+                                    </span>
+                                    <span className="text-[8px] font-bold bg-white/20 px-1 py-0.5 leading-none">
+                                      {viewType === 'Room' 
+                                        ? groups.filter(g => entry.groupIds?.includes(g.id)).map(g => g.name).join(', ')
+                                        : rooms.find(r => r.id === entry.roomId)?.name || 'No Room'}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
@@ -471,6 +524,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
               ))}
             </tbody>
           </table>
+          )}
         </div>
       </div>
 
@@ -492,7 +546,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
         </div>
       </div>
 
-      {!isMobile && (
+      {!isMobile && !isMaximized && (
         <>
           <div onMouseDown={(e) => handleResizeStart(e, 'n')} className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize z-50" />
           <div onMouseDown={(e) => handleResizeStart(e, 's')} className="absolute bottom-0 left-0 right-0 h-1 cursor-ns-resize z-50" />
@@ -538,6 +592,22 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                 >
                   <FolderSync className="w-3.5 h-3.5" /> Copy Session
                 </button>
+                {(() => {
+                  const prevSlotIndex = TIME_SLOTS.indexOf(contextMenu.entry!.startTime) - 1;
+                  const prevTime = prevSlotIndex >= 0 ? TIME_SLOTS[prevSlotIndex] : null;
+                  if (!prevTime) return null;
+                  return (
+                    <button 
+                      onClick={() => { 
+                        onCellClick?.(contextMenu.entry!.day, prevTime, viewType, viewId);
+                        setContextMenu(null); 
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-[11px] font-bold text-[#333] hover:bg-[#185baf] hover:text-white transition-colors flex items-center gap-2"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Create Event Above
+                    </button>
+                  );
+                })()}
                 <button 
                   onClick={() => { onDuplicateEntry?.(contextMenu.entry!); setContextMenu(null); }}
                   className="w-full text-left px-3 py-1.5 text-[11px] font-bold text-[#333] hover:bg-[#185baf] hover:text-white transition-colors flex items-center gap-2"

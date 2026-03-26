@@ -39,7 +39,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users }) => {
   };
 
   return (
-    <div className="min-h-screen bg-[#008080] flex items-center justify-center p-4 font-sans">
+    <div className="min-h-screen login-bg flex items-center justify-center p-4 font-sans">
       <div className="bg-[#f0f0f0] border-2 border-[#185baf] shadow-[4px_4px_0_rgba(0,0,0,0.3)] w-full max-w-[420px]">
         {/* Title Bar */}
         <div className="bg-[#185baf] text-white px-3 py-1.5 flex justify-between items-center cursor-default">
@@ -102,14 +102,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, users }) => {
             <div className="flex justify-end gap-2 pt-2">
               <button 
                 type="submit" 
-                className="btn-primary min-w-[80px]"
+                className="bg-[#185baf] text-white px-5 py-1.5 text-[11px] font-bold uppercase tracking-widest border border-[#0d3b76] hover:bg-[#124584] shadow-[2px_2px_0_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all min-w-[80px]"
               >
                 OK
               </button>
               <button 
                 type="button" 
                 onClick={() => { setUsername(''); setPassword(''); }} 
-                className="btn-secondary min-w-[80px]"
+                className="bg-white text-[#333] px-5 py-1.5 text-[11px] font-bold uppercase tracking-widest border border-[#ccc] hover:bg-[#f2f2f2] shadow-[2px_2px_0_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.8)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all min-w-[80px]"
               >
                 Cancel
               </button>

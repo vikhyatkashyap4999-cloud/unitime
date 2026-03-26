@@ -4,9 +4,10 @@ import { Course, Faculty, Room, StudentGroup, DayOfWeek, ScheduleEntry } from '.
 import { DAYS, TIME_SLOTS, TOTAL_WEEKS } from '../constants';
 import { SearchableDropdown, MultiSearchableDropdown } from './ui/Dropdowns';
 import { 
-  X, Calendar, Clock, MapPin, User, Users, BookOpen, Search, ChevronDown, Zap, RefreshCw, Check, AlertCircle 
+  AlertCircle, BookOpen, Calendar, Check, ChevronDown, Clock, MapPin, RefreshCw, Search, User, Users, X, Zap 
 } from 'lucide-react';
 import { DataService } from '../services/dataService';
+import { formatTime12h } from '../services/utils';
 
 interface SessionModalProps {
   isOpen: boolean;
@@ -20,6 +21,10 @@ interface SessionModalProps {
   existingSchedule: ScheduleEntry[];
 }
 
+const PREDEFINED_CATEGORIES = [
+  'Explo', 'meeting', 'Theory', 'LAB', 'Online Class', 'Tut', 'Minor', 'Elective', 'Hons', 'PE1', 'PE2', 'PE3', 'Mid Sem Sub'
+];
+
 const SessionModal: React.FC<SessionModalProps> = ({
   isOpen, onClose, onSave, initialData, courses, faculties, rooms, groups, existingSchedule
 }) => {
@@ -27,7 +32,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
     day: 'Monday',
     startTime: '09:00',
     endTime: '10:00',
-    weeks: [1],
+    weeks: Array.from({ length: TOTAL_WEEKS }, (_, i) => i + 1),
     category: 'Theory',
     groupIds: [],
     ...initialData
@@ -168,6 +173,18 @@ const SessionModal: React.FC<SessionModalProps> = ({
   };
 
   const inlineConflicts = getInlineConflicts();
+  
+  const isFormValid = !!(
+    formData.courseId && 
+    formData.facultyId && 
+    formData.roomId && 
+    formData.groupIds && 
+    formData.groupIds.length > 0 && 
+    formData.day && 
+    formData.startTime && 
+    formData.endTime &&
+    (formData.weeks && formData.weeks.length > 0)
+  );
 
   return (
     <AnimatePresence>
@@ -209,7 +226,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
           <form onSubmit={handleSubmit} className="p-4 space-y-4 max-h-[75vh] overflow-y-auto custom-scrollbar">
             <div className="bg-white border border-[#ccc] p-3 space-y-3">
               <SearchableDropdown 
-                label="Course / Module"
+                label={<span>Course / Module <span className="text-red-500">*</span></span>}
                 icon={<BookOpen className="w-3.5 h-3.5" />}
                 options={courses.map(c => ({ id: c.id, name: `${c.code} - ${c.name}`, sub: `${c.credits} Credits · ${c.department}` }))}
                 value={formData.courseId || ''}
@@ -219,18 +236,33 @@ const SessionModal: React.FC<SessionModalProps> = ({
               />
 
               <div className="grid grid-cols-2 gap-4">
-                <SearchableDropdown
-                  label="Category"
-                  icon={<Zap className="w-3.5 h-3.5" />}
-                  options={[
-                    { id: 'Theory', name: 'Theory' },
-                    { id: 'Lab', name: 'Lab' },
-                    { id: 'Seminar', name: 'Seminar' },
-                    { id: 'Workshop', name: 'Workshop' },
-                  ]}
-                  value={formData.category || 'Theory'}
-                  onChange={val => setFormData({ ...formData, category: val as any })}
-                />
+                <div className="flex flex-col gap-2">
+                  <SearchableDropdown
+                    label="Event Type"
+                    icon={<Zap className="w-3.5 h-3.5" />}
+                    options={[
+                      ...PREDEFINED_CATEGORIES.map(c => ({ id: c, name: c })),
+                      { id: 'CUSTOM_TYPE', name: 'Other (Custom...)' }
+                    ]}
+                    value={formData.category && !PREDEFINED_CATEGORIES.includes(formData.category) ? 'CUSTOM_TYPE' : (formData.category || 'Theory')}
+                    onChange={val => {
+                      if (val === 'CUSTOM_TYPE') setFormData({ ...formData, category: '' });
+                      else setFormData({ ...formData, category: val });
+                    }}
+                  />
+                  {(formData.category === '' || (formData.category && !PREDEFINED_CATEGORIES.includes(formData.category))) && (
+                    <div className="px-2 pb-1">
+                       <input 
+                        type="text"
+                        autoFocus
+                        placeholder="ENTER CUSTOM EVENT TYPE..."
+                        value={formData.category || ''}
+                        onChange={e => setFormData({ ...formData, category: e.target.value })}
+                        className="w-full bg-[#f8f9fa] border-b-2 border-[#185baf] px-2 py-1 text-[11px] font-bold text-[#185baf] outline-none placeholder:text-[#ccc] uppercase tracking-widest"
+                      />
+                    </div>
+                  )}
+                </div>
                 <SearchableDropdown
                   label="Day"
                   icon={<Calendar className="w-3.5 h-3.5" />}
@@ -244,14 +276,14 @@ const SessionModal: React.FC<SessionModalProps> = ({
                 <SearchableDropdown
                   label="Start Time"
                   icon={<Clock className="w-3.5 h-3.5" />}
-                  options={TIME_SLOTS.map(t => ({ id: t, name: t }))}
+                  options={TIME_SLOTS.map(t => ({ id: t, name: formatTime12h(t) }))}
                   value={formData.startTime || '09:00'}
                   onChange={val => setFormData({ ...formData, startTime: val })}
                 />
                 <SearchableDropdown
                   label="End Time"
                   icon={<Clock className="w-3.5 h-3.5" />}
-                  options={TIME_SLOTS.map(t => ({ id: t, name: t, extra: formData.startTime && t <= formData.startTime ? <span className="text-[8px] text-red-600 font-bold border border-red-600 px-1 ml-1 bg-red-50">ERR</span> : null }))}
+                  options={TIME_SLOTS.map(t => ({ id: t, name: formatTime12h(t), extra: formData.startTime && t <= formData.startTime ? <span className="text-[8px] text-red-600 font-bold border border-red-600 px-1 ml-1 bg-red-50">ERR</span> : null }))}
                   value={formData.endTime || '10:00'}
                   onChange={val => setFormData({ ...formData, endTime: val })}
                 />
@@ -339,7 +371,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
             {/* Assignments */}
             <div className="bg-white border border-[#ccc] p-3 space-y-3">
               <SearchableDropdown 
-                label="Staff / Faculty"
+                label={<span>Staff / Faculty <span className="text-red-500">*</span></span>}
                 icon={<User className="w-3.5 h-3.5" />}
                 options={faculties.map(f => {
                    const load = getFacultyLoad(f.id);
@@ -375,7 +407,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
               )}
 
               <SearchableDropdown 
-                label="Room / Venue"
+                label={<span>Room / Venue <span className="text-red-500">*</span></span>}
                 icon={<MapPin className="w-3.5 h-3.5" />}
                 options={rooms.map(r => ({ id: r.id, name: r.name, sub: `${r.type} · Cap: ${r.capacity}` }))}
                 value={formData.roomId || ''}
@@ -385,7 +417,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
               />
 
               <MultiSearchableDropdown 
-                label="Cohorts / Student Groups"
+                label={<span>Cohorts / Student Groups <span className="text-red-500">*</span></span>}
                 icon={<Users className="w-3.5 h-3.5" />}
                 options={groups.map(g => ({ id: g.id, name: g.name, sub: `${g.program} · Sem ${g.semester}` }))}
                 values={formData.groupIds || []}
@@ -423,7 +455,8 @@ const SessionModal: React.FC<SessionModalProps> = ({
             <button 
               type="button"
               onClick={handleSubmit} 
-              className="btn-primary min-w-[80px]"
+              disabled={!isFormValid}
+              className={`btn-primary min-w-[80px] transition-all ${!isFormValid ? 'opacity-40 grayscale cursor-not-allowed border-[#999]' : ''}`}
             >
               Save Schedule
             </button>

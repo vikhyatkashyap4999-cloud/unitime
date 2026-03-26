@@ -76,7 +76,7 @@ export interface ScheduleEntry {
   endTime: string;   
   departmentId: string;
   weeks: number[];
-  category?: 'Theory' | 'Lab' | 'Seminar' | 'Workshop';
+  category?: string;
 }
 
 export interface Clash {

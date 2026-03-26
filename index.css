@@ -62,15 +62,15 @@
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] uppercase tracking-wide font-bold transition-colors disabled:opacity-50 disabled:pointer-events-none rounded-sm border border-[#0d3b76] bg-[#185baf] text-white hover:bg-[#124584] shadow-none;
+    @apply inline-flex items-center justify-center gap-1.5 px-4 py-1.5 text-[11px] uppercase tracking-widest font-bold transition-all disabled:opacity-50 disabled:pointer-events-none rounded-none border border-[#0d3b76] bg-[#185baf] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2),2px_2px_0_rgba(0,0,0,0.2)] hover:bg-[#124584] active:shadow-none active:translate-x-[1px] active:translate-y-[1px];
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] uppercase tracking-wide font-bold transition-colors disabled:opacity-50 disabled:pointer-events-none rounded-sm border border-[#ccc] bg-white text-[#333] hover:bg-[#e6e6e6] shadow-none;
+    @apply inline-flex items-center justify-center gap-1.5 px-4 py-1.5 text-[11px] uppercase tracking-widest font-bold transition-all disabled:opacity-50 disabled:pointer-events-none rounded-none border border-[#ccc] bg-white text-[#333] shadow-[inset_0_1px_0_rgba(255,255,255,0.8),2px_2px_0_rgba(0,0,0,0.1)] hover:bg-[#f2f2f2] active:shadow-none active:translate-x-[1px] active:translate-y-[1px];
   }
 
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] uppercase tracking-wide font-bold transition-colors disabled:opacity-50 disabled:pointer-events-none rounded-sm border border-[#ac2925] bg-[#d9534f] text-white hover:bg-[#c9302c] shadow-none;
+    @apply inline-flex items-center justify-center gap-1.5 px-4 py-1.5 text-[11px] uppercase tracking-widest font-bold transition-all disabled:opacity-50 disabled:pointer-events-none rounded-none border border-[#ac2925] bg-[#d9534f] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2),2px_2px_0_rgba(0,0,0,0.2)] hover:bg-[#c9302c] active:shadow-none active:translate-x-[1px] active:translate-y-[1px];
   }
 
   /* Enterprise Input Base */
@@ -89,10 +89,9 @@
   }
 }
 
-.glass {
-  @apply bg-white border border-[#ccc];
-}
-
-.animate-float {
-  /* No animations for enterprise */
+.login-bg {
+  background: radial-gradient(circle at top right, #185baf, #008080);
+  background-image: 
+    radial-gradient(circle at top right, rgba(24, 91, 175, 0.8), rgba(0, 128, 128, 0.9)),
+    url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
 }

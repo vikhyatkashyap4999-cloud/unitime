@@ -49,7 +49,7 @@ const TopNav: React.FC<TopNavProps> = ({
   const toolItems = [
     { id: 'reports', label: 'Reports', roles: [Role.SUPER_ADMIN, Role.ADMIN, Role.SCHEDULER] },
     { id: 'terms', label: 'Academic Terms', roles: [Role.SUPER_ADMIN, Role.ADMIN, Role.SCHEDULER] },
-    { id: 'data', label: 'Resources & Data' },
+    { id: 'data', label: 'Resources & Data', roles: [Role.SUPER_ADMIN, Role.ADMIN] },
     { id: 'admin', label: 'Team Workspace', roles: [Role.SUPER_ADMIN] },
   ];
 

@@ -63,30 +63,50 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
   };
 
   const getFullTimetableData = (filteredSchedule: ScheduleEntry[]) => {
-    return filteredSchedule.map((s, index) => {
+    const rows: any[] = [];
+    filteredSchedule.forEach((s, index) => {
+      const eventId = index + 1;
       const course = courses.find(c => c.id === s.courseId);
       const faculty = faculties.find(f => f.id === s.facultyId);
       const room = rooms.find(r => r.id === s.roomId);
-      const groupNames = groups
-        .filter(g => s.groupIds?.includes(g.id))
-        .map(g => (g as any)._unique_name || g.name)
-        .join(', ');
-
-      return {
-        '_event_id': index + 1,
-        '_day_of_week': s.day.substring(0, 3), 
-        '_start_time': s.startTime,
-        '_end_time': s.endTime,
-        '_weeks': 'Jan-25',
-        '_event_type': s.category || 'Explo',
-        'Module Unique ID': (course as any)?._unique_name || course?.code || '',
-        'Module': (course as any)?._name || course?.name || '',
-        'Room': (room as any)?._unique_name || room?.name || '',
-        'Staff_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
-        'Staff_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
-        'Group': groupNames || ''
-      };
+      
+      const sessionGroups = groups.filter(g => s.groupIds?.includes(g.id));
+      
+      if (sessionGroups.length === 0) {
+        rows.push({
+          '_event_id': eventId,
+          '_day_of_week': s.day.substring(0, 3), 
+          '_start_time': s.startTime,
+          '_end_time': s.endTime,
+          '_weeks': 'Jan-25',
+          '_event_type': s.category || 'Explo',
+          'Module Unique ID': (course as any)?._unique_name || course?.code || '',
+          'Module': (course as any)?._name || course?.name || '',
+          'Room': (room as any)?._unique_name || room?.name || '',
+          'Staff_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
+          'Staff_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
+          'Group': ''
+        });
+      } else {
+        sessionGroups.forEach(g => {
+          rows.push({
+            '_event_id': eventId,
+            '_day_of_week': s.day.substring(0, 3), 
+            '_start_time': s.startTime,
+            '_end_time': s.endTime,
+            '_weeks': 'Jan-25',
+            '_event_type': s.category || 'Explo',
+            'Module Unique ID': (course as any)?._unique_name || course?.code || '',
+            'Module': (course as any)?._name || course?.name || '',
+            'Room': (room as any)?._unique_name || room?.name || '',
+            'Staff_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
+            'Staff_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
+            'Group': (g as any)._unique_name || g.name
+          });
+        });
+      }
     });
+    return rows;
   };
 
   const reportCards = [
