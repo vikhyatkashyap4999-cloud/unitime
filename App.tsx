@@ -39,12 +39,12 @@ const App: React.FC = () => {
   });
   const [activeTab, setActiveTab] = useState('dashboard');
   const [panels, setPanels] = useState<any[]>([
-    { id: 'p1', type: 'Group', viewId: '', x: 20, y: 20, w: 800, h: 350, z: 10 },
+    { id: 'p1', type: 'Group', viewId: 'g1', x: 20, y: 20, w: 800, h: 350, z: 10 },
   ]);
 
   const resetUIState = () => {
     setActiveTab('dashboard');
-    setPanels([{ id: 'p1', type: 'Group', viewId: '', x: 20, y: 20, w: 800, h: 350, z: 10 }]);
+    setPanels([{ id: 'p1', type: 'Group', viewId: 'g1', x: 20, y: 20, w: 800, h: 350, z: 10 }]);
     setIsRoomToolOpen(false);
   };
 
