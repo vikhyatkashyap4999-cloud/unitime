@@ -12,13 +12,15 @@ interface DataImportPanelProps {
   onUploadFaculties: (data: Faculty[]) => void;
   onUploadRooms: (data: Room[]) => void;
   onUploadGroups: (data: StudentGroup[]) => void;
+  activeTermId?: string;
 }
 
 type ImportType = 'Modules' | 'Faculties' | 'Rooms' | 'Groups';
 
 const DataImportPanel: React.FC<DataImportPanelProps> = ({
   courses, faculties, rooms, groups,
-  onUploadCourses, onUploadFaculties, onUploadRooms, onUploadGroups
+  onUploadCourses, onUploadFaculties, onUploadRooms, onUploadGroups,
+  activeTermId
 }) => {
   const [activeTab, setActiveTab] = useState<ImportType>('Modules');
   const [lastUpload, setLastUpload] = useState<{ type: string; count: number } | null>(null);
@@ -380,7 +382,10 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b-2 border-[#185baf] pb-2">
         <div>
           <h2 className="text-xl font-bold text-[#333] tracking-tight">Resource Management</h2>
-          <p className="text-sm font-medium text-[#666]">Configure institutional data manually or via bulk CSV upload.</p>
+          <p className="text-sm font-medium text-[#666]">
+            Configure institutional data manually or via bulk CSV upload. 
+            {activeTermId && <span className="ml-2 px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-[10px] font-bold uppercase tracking-tighter">Active Term: {activeTermId}</span>}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <AnimatePresence>

@@ -7,10 +7,12 @@ import { supabase } from './supabase';
 export class DataService {
   private static STORAGE_KEY = 'unitime_full_dataset';
 
-  static async loadAllEntries(): Promise<ScheduleEntry[]> {
+  static async loadAllEntries(termId?: string): Promise<ScheduleEntry[]> {
     try {
       if (supabase) {
-        const { data, error } = await supabase.from('schedule').select('*');
+        let query = supabase.from('schedule').select('*');
+        if (termId) query = query.eq('termId', termId);
+        const { data, error } = await query;
         if (!error && data) return data;
         if (error) console.warn('Supabase select error:', error);
       }
@@ -19,18 +21,32 @@ export class DataService {
     }
 
     const saved = localStorage.getItem(this.STORAGE_KEY);
-    return saved ? JSON.parse(saved) : [];
+    const entries = saved ? JSON.parse(saved) : [];
+    if (termId) {
+      return entries.filter((e: ScheduleEntry) => e.termId === termId);
+    }
+    return entries;
   }
 
-  static async saveEntries(entries: ScheduleEntry[]): Promise<void> {
+  static async saveEntries(entries: ScheduleEntry[], termId?: string): Promise<void> {
     try {
       if (supabase) {
         console.log('Syncing schedule to Supabase...', entries);
-        const { error: deleteError } = await supabase.from('schedule').delete().neq('id', '0');
+        // If we have a termId, only clear that term's schedule to prevent data loss for other terms
+        let deleteQuery = supabase.from('schedule').delete();
+        if (termId) {
+          deleteQuery = deleteQuery.eq('termId', termId);
+        } else {
+          deleteQuery = deleteQuery.neq('id', '0');
+        }
+        
+        const { error: deleteError } = await deleteQuery;
         if (deleteError) {
           console.error('Failed to clear schedule in Supabase:', deleteError);
         }
-        const { error: insertError } = await supabase.from('schedule').insert(entries);
+        
+        const itemsToInsert = termId ? entries.map(e => ({ ...e, termId })) : entries;
+        const { error: insertError } = await supabase.from('schedule').insert(itemsToInsert);
         if (insertError) {
           console.error('Failed to sync schedule with Supabase:', insertError);
           alert(`Supabase Error (Schedule): ${insertError.message}. Check if table "schedule" exists.`);
@@ -48,11 +64,16 @@ export class DataService {
   /**
    * Generic methods for other entities
    */
-  static async loadEntity<T>(tableName: string, storageKey: string, defaultValue: T[]): Promise<T[]> {
+  static async loadEntity<T>(tableName: string, storageKey: string, defaultValue: T[], termId?: string): Promise<T[]> {
     try {
       if (supabase) {
-        const { data, error } = await supabase.from(tableName).select('*');
-        if (!error && data && data.length > 0) return data as T[];
+        let query = supabase.from(tableName).select('*');
+        // Users and Terms are global, don't filter by termId
+        if (termId && tableName !== 'users' && tableName !== 'terms') {
+          query = query.eq('termId', termId);
+        }
+        const { data, error } = await query;
+        if (!error && data) return data as T[];
         if (error) console.warn(`Supabase load error for ${tableName}:`, error);
       }
     } catch (err) {
@@ -61,44 +82,58 @@ export class DataService {
     
     const saved = localStorage.getItem(storageKey);
     try {
-      return saved ? JSON.parse(saved) : defaultValue;
+      const data = saved ? JSON.parse(saved) : defaultValue;
+      if (termId && tableName !== 'users' && tableName !== 'terms') {
+        return data.filter((item: any) => item.termId === termId || !item.termId);
+      }
+      return data;
     } catch {
       return defaultValue;
     }
   }
 
-  static async saveEntity<T>(tableName: string, storageKey: string, data: T[]): Promise<void> {
+  static async saveEntity<T extends { id: string, termId?: string }>(tableName: string, storageKey: string, data: T[], termId?: string): Promise<void> {
     try {
       if (supabase) {
         console.log(`Syncing ${tableName} to Supabase...`, data);
         
-        // 1. Clear existing data
-        const { error: deleteError } = await supabase.from(tableName).delete().not('id', 'is', null);
+        // 1. Clear existing data for this term (if scoped)
+        let deleteQuery = supabase.from(tableName).delete();
+        if (termId && tableName !== 'users' && tableName !== 'terms') {
+          deleteQuery = deleteQuery.eq('termId', termId);
+        } else {
+          deleteQuery = deleteQuery.not('id', 'is', null);
+        }
+        
+        const { error: deleteError } = await deleteQuery;
         if (deleteError) {
           console.error(`Failed to clear ${tableName} in Supabase:`, deleteError);
         }
 
-        // 2. Strict Whitelist Sanitization (to prevent Supabase "column not found" errors)
+        // 2. Strict Whitelist Sanitization
         const SCHEMA_WHITELIST: Record<string, string[]> = {
           users: ['id', 'username', 'password', 'name', 'role', 'departmentScope', 'lastLogin'],
           terms: ['id', 'name', 'startDate', 'endDate', 'academicYear', 'isActive'],
-          courses: ['id', 'code', 'name', 'credits', 'department', 'duration', 'type', 'color'],
-          faculties: ['id', 'name', 'department', 'availability', 'maxHoursPerWeek'],
-          rooms: ['id', 'name', 'capacity', 'type'],
-          groups: ['id', 'name', 'program', 'semester', 'studentCount'],
+          courses: ['id', 'termId', 'code', 'name', 'credits', 'department', 'duration', 'type', 'color'],
+          faculties: ['id', 'termId', 'name', 'department', 'availability', 'maxHoursPerWeek'],
+          rooms: ['id', 'termId', 'name', 'capacity', 'type'],
+          groups: ['id', 'termId', 'name', 'program', 'semester', 'studentCount'],
           schedule: ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category']
         };
 
         const sanitizedData = data.map((item: any) => {
           const schema = SCHEMA_WHITELIST[tableName] || [];
-          if (schema.length === 0) return item; // If table not in whitelist, send as-is (risky)
+          if (schema.length === 0) return item;
 
           const newItem: any = {};
           schema.forEach(key => {
             if (item[key] !== undefined) newItem[key] = item[key];
           });
+          
+          if (termId && tableName !== 'users' && tableName !== 'terms') {
+            newItem.termId = termId;
+          }
 
-          // Special case: Ensure lastLogin is a valid timestamp or null
           if (tableName === 'users' && newItem.lastLogin) {
             if (newItem.lastLogin === '-' || newItem.lastLogin.length < 5) newItem.lastLogin = null;
           }
@@ -106,11 +141,10 @@ export class DataService {
           return newItem;
         });
 
-        // 3. Batch Insert
         const { error: insertError } = await supabase.from(tableName).insert(sanitizedData);
         if (insertError) {
           console.error(`Failed to insert ${tableName} into Supabase:`, insertError);
-          const msg = `Supabase Sync Error (${tableName}): ${insertError.message}\n\nPlease check your CSV headers/schema.`;
+          const msg = `Supabase Sync Error (${tableName}): ${insertError.message}`;
           alert(msg);
         } else {
           console.log(`Successfully synced ${tableName} to Supabase.`);
@@ -120,30 +154,21 @@ export class DataService {
       console.error(`Unexpected crash syncing ${tableName}:`, err);
     }
     
-    // Always persist to local storage regardless of Supabase status
     localStorage.setItem(storageKey, JSON.stringify(data));
   }
 
-  /**
-   * Helper to calculate duration in hours from startTime and endTime
-   */
   static getDuration(start: string, end: string): number {
     const [sH, sM] = start.split(':').map(Number);
     const [eH, eM] = end.split(':').map(Number);
     return (eH + eM / 60) - (sH + sM / 60);
   }
 
-  /**
-   * High-Performance Clash Detection (O(N))
-   */
   static detectConflicts(schedule: ScheduleEntry[], facultyList: Faculty[] = []): Clash[] {
     const clashes: Clash[] = [];
     const roomMap = new Map<string, string>();
     const facultyMap = new Map<string, string>();
     const groupMap = new Map<string, string>();
-    
-    // Track weekly load per faculty per week
-    const loadTracker = new Map<string, number>(); // key: week-facultyId, value: totalHours
+    const loadTracker = new Map<string, number>();
 
     for (const entry of schedule) {
       const weeks = entry.weeks || [];
@@ -152,7 +177,6 @@ export class DataService {
       for (const week of weeks) {
         const baseKey = `${week}-${entry.day}-${entry.startTime}`;
         
-        // Overlap Conflicts (Same time, same resource)
         const roomKey = `${baseKey}-room-${entry.roomId}`;
         if (roomMap.has(roomKey)) {
           clashes.push({ type: 'Room', message: `Room Conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, roomMap.get(roomKey)!] });
@@ -177,14 +201,12 @@ export class DataService {
           }
         }
 
-        // Load Constraints
         const loadKey = `${week}-${entry.facultyId}`;
         const currentLoad = (loadTracker.get(loadKey) || 0) + duration;
         loadTracker.set(loadKey, currentLoad);
       }
     }
 
-    // Evaluate Load Violations
     if (facultyList.length > 0) {
       loadTracker.forEach((hours, key) => {
         const [week, fId] = key.split('-');

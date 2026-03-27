@@ -1,6 +1,7 @@
 import React from 'react';
 import { FileText, Download, Table, AlertTriangle, Calendar, Users, Briefcase } from 'lucide-react';
 import { ScheduleEntry, Course, Faculty, Room, StudentGroup, Term, Clash, UserAccount } from '../types';
+import { DataService } from '../services/dataService';
 
 interface ReportsPanelProps {
   schedule: ScheduleEntry[];
@@ -164,9 +165,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
         const data = faculties.map(f => {
           const facultySessions = filteredSchedule.filter(s => s.facultyId === f.id);
           const totalWeeklyMinutes = facultySessions.reduce((acc, s) => {
-             const [sh, sm] = s.startTime.split(':').map(Number);
-             const [eh, em] = s.endTime.split(':').map(Number);
-             return acc + ((eh * 60 + em) - (sh * 60 + sm));
+             return acc + (DataService.getDuration(s.startTime, s.endTime) * 60);
           }, 0);
           
           return {

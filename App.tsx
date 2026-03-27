@@ -35,7 +35,12 @@ const MOCK_USERS: UserAccount[] = [
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
     const saved = localStorage.getItem('unitime_session');
-    return saved ? JSON.parse(saved) : null;
+    try {
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      console.error('Failed to parse session:', e);
+      return null;
+    }
   });
   const [activeTab, setActiveTab] = useState('dashboard');
   const [panels, setPanels] = useState<any[]>([
@@ -71,15 +76,16 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       setIsSyncing(true);
+      const termId = effectiveActiveTerm?.id;
       try {
         const [u, t, c, f, r, g, s] = await Promise.all([
           DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS),
           DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS),
-          DataService.loadEntity<Course>('courses', 'unitime_courses', MOCK_COURSES),
-          DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', MOCK_FACULTY),
-          DataService.loadEntity<Room>('rooms', 'unitime_rooms', MOCK_ROOMS),
-          DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', MOCK_GROUPS),
-          DataService.loadAllEntries()
+          DataService.loadEntity<Course>('courses', 'unitime_courses', MOCK_COURSES, termId),
+          DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', MOCK_FACULTY, termId),
+          DataService.loadEntity<Room>('rooms', 'unitime_rooms', MOCK_ROOMS, termId),
+          DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', MOCK_GROUPS, termId),
+          DataService.loadAllEntries(termId)
         ]);
         setUsers(u);
         setTerms(t);
@@ -98,9 +104,10 @@ const App: React.FC = () => {
 
     // Real-time Multi-user Synchronization
     if (supabase) {
+      const termId = effectiveActiveTerm?.id;
       const channel = supabase.channel('realtime_sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
-          const s = await DataService.loadAllEntries();
+          const s = await DataService.loadAllEntries(termId);
           setSchedule(s);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, async () => {
@@ -112,19 +119,19 @@ const App: React.FC = () => {
           setTerms(t);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, async () => {
-          const c = await DataService.loadEntity<Course>('courses', 'unitime_courses', MOCK_COURSES);
+          const c = await DataService.loadEntity<Course>('courses', 'unitime_courses', MOCK_COURSES, termId);
           setCourses(c);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' }, async () => {
-          const f = await DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', MOCK_FACULTY);
+          const f = await DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', MOCK_FACULTY, termId);
           setFaculties(f);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, async () => {
-          const r = await DataService.loadEntity<Room>('rooms', 'unitime_rooms', MOCK_ROOMS);
+          const r = await DataService.loadEntity<Room>('rooms', 'unitime_rooms', MOCK_ROOMS, termId);
           setRooms(r);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, async () => {
-          const g = await DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', MOCK_GROUPS);
+          const g = await DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', MOCK_GROUPS, termId);
           setGroups(g);
         })
         .subscribe();
@@ -264,6 +271,41 @@ const App: React.FC = () => {
     setIsSyncing(true);
     setGroups(updatedGroups);
     await DataService.saveEntity('groups', 'unitime_groups', updatedGroups);
+    setIsSyncing(false);
+  };
+
+  const handleWipeAllData = async () => {
+    if (!confirm('CRITICAL ACTION: This will delete ALL courses, faculty, rooms, cohorts and scheduled sessions from BOTH local storage and Supabase. Only user accounts and terms will be preserved. Proceed?')) {
+      return;
+    }
+    
+    setIsSyncing(true);
+    try {
+      if (supabase) {
+        const tables = ['schedule', 'courses', 'faculties', 'rooms', 'groups'];
+        for (const table of tables) {
+          await supabase.from(table).delete().neq('id', '0');
+        }
+      }
+      
+      // Clear local state
+      setSchedule([]);
+      setCourses([]);
+      setFaculties([]);
+      setRooms([]);
+      setGroups([]);
+      
+      // Clear local storage keys
+      localStorage.removeItem('unitime_full_dataset');
+      localStorage.removeItem('unitime_courses');
+      localStorage.removeItem('unitime_faculties');
+      localStorage.removeItem('unitime_rooms');
+      localStorage.removeItem('unitime_groups');
+      
+      alert('System successfully reset. All demo data has been purged.');
+    } catch (err: any) {
+      alert('Reset Failed: ' + (err.message || 'Unknown error.'));
+    }
     setIsSyncing(false);
   };
 
@@ -579,8 +621,8 @@ const App: React.FC = () => {
           )}
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} />}
           {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
-          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} />}
-          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} />}
+          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} activeTermId={effectiveActiveTerm?.id} />}
+          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} onWipeAllData={handleWipeAllData} />}
         </div>
       </main>
 

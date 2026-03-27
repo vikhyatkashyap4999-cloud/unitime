@@ -31,6 +31,7 @@ export interface Term {
 
 export interface Course {
   id: string;
+  termId?: string;
   code: string;
   name: string;
   credits: number;
@@ -43,6 +44,7 @@ export interface Course {
 
 export interface Faculty {
   id: string;
+  termId?: string;
   name: string;
   department: string;
   availability: string[];
@@ -51,6 +53,7 @@ export interface Faculty {
 
 export interface Room {
   id: string;
+  termId?: string;
   name: string;
   capacity: number;
   type: 'Lecture' | 'Lab' | 'Seminar';
@@ -58,6 +61,7 @@ export interface Room {
 
 export interface StudentGroup {
   id: string;
+  termId?: string;
   name: string;
   program: string;
   semester: number;

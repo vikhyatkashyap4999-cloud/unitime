@@ -76,17 +76,23 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
   const resourceOptions = useMemo(() => {
     let opts: { id: string, name: string }[] = [];
     if (viewType === 'Room') opts = rooms.map(r => ({ id: r.id, name: r.name }));
-    else if (viewType === 'Faculty') opts = faculties.map(f => ({ id: f.id, name: f.name }));
+    else if (viewType === 'Faculty') opts = faculties.map(f => ({ id: f.id, name: f.name, facultyId: f.id }));
     else if (viewType === 'Group') opts = groups.map(g => ({ id: g.id, name: g.name }));
     else if (viewType === 'Course') opts = courses.map(c => ({ id: c.id, name: `${c.code} ${c.name}` }));
     
     if (!searchQuery) return opts;
-    return opts.filter(o => o.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    return opts.filter(o => 
+      o.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      (o as any).facultyId?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
   }, [viewType, rooms, faculties, groups, courses, searchQuery]);
 
   const activeObjectName = useMemo(() => {
     if (viewType === 'Room') return rooms.find(r => r.id === viewId)?.name;
-    if (viewType === 'Faculty') return faculties.find(f => f.id === viewId)?.name;
+    if (viewType === 'Faculty') {
+      const f = faculties.find(f => f.id === viewId);
+      return f ? `${f.name} (${f.id})` : undefined;
+    }
     if (viewType === 'Group') return groups.find(g => g.id === viewId)?.name;
     if (viewType === 'Course') {
         const c = courses.find(c => c.id === viewId);
@@ -325,7 +331,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                           onClick={() => { onUpdateView?.(viewType, opt.id); setIsSelectorOpen(false); setSearchQuery(''); }} 
                           className={`w-full text-left px-3 py-2 text-xs font-bold transition-all border border-transparent mb-0.5 ${viewId === opt.id ? 'bg-[#185baf] text-white border-[#0d47a1]' : 'hover:bg-[#f0f0f0] hover:border-[#ccc] text-[#333]'}`}
                         >
-                          {opt.name}
+                          {viewType === 'Faculty' ? `${opt.name} (${opt.id})` : opt.name}
                         </button>
                       ))
                     ) : (
@@ -488,10 +494,15 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                                          <Users className="w-3.5 h-3.5 shrink-0" />
                                          <span>{entry.groupIds?.map(id => groups.find(g => g.id === id)?.name).filter(Boolean).join(', ') || 'No Cohort'}</span>
                                       </div>
-                                      <div className="flex items-center gap-2 text-[10px] font-bold opacity-100 truncate">
-                                         <User className="w-3.5 h-3.5 shrink-0" />
-                                         <span>{faculties.find(f => f.id === entry.facultyId)?.name || 'No Staff'}</span>
-                                      </div>
+                                       <div className="flex items-center gap-2 text-[10px] font-bold opacity-100 truncate">
+                                          <User className="w-3.5 h-3.5 shrink-0" />
+                                          <span>
+                                            {(() => {
+                                              const f = faculties.find(f => f.id === entry.facultyId);
+                                              return f ? `${f.name} (${f.id})` : 'No Staff';
+                                            })()}
+                                          </span>
+                                       </div>
                                       <div className="flex items-center gap-2 text-[10px] font-bold opacity-100 truncate">
                                          <MapPin className="w-3.5 h-3.5 shrink-0" />
                                          <span>{rooms.find(r => r.id === entry.roomId)?.name || 'No Room'}</span>
@@ -503,8 +514,11 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                                   <div className="mt-auto flex justify-between items-end">
                                     <span className="text-[8px] truncate max-w-[60%] opacity-90 font-bold">
                                       {viewType === 'Faculty' 
-                                        ? groups.filter(g => entry.groupIds?.includes(g.id)).map(g => g.name).join(', ')
-                                        : faculties.find(f => f.id === entry.facultyId)?.name || 'No Staff'}
+                                        ? (groups.filter(g => entry.groupIds?.includes(g.id)).map(g => g.name).join(', ') || 'No Cohort')
+                                        : (() => {
+                                            const f = faculties.find(f => f.id === entry.facultyId);
+                                            return f ? `${f.name} (${f.id})` : 'No Staff';
+                                          })()}
                                     </span>
                                     <span className="text-[8px] font-bold bg-white/20 px-1 py-0.5 leading-none">
                                       {viewType === 'Room' 

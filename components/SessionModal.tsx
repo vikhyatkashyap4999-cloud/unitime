@@ -80,7 +80,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
     e.preventDefault();
     if (formData.courseId && formData.facultyId && formData.roomId && formData.groupIds && formData.groupIds.length > 0 && formData.day && formData.startTime && formData.endTime) {
       const baseEntry: Omit<ScheduleEntry, 'id' | 'departmentId'> = {
-        termId: formData.termId || 't1',
+        termId: formData.termId || 't1', // Will be overridden by activeTermId in App.tsx handleSave
         courseId: formData.courseId,
         facultyId: formData.facultyId,
         roomId: formData.roomId,
@@ -378,7 +378,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
                    const isCritical = load >= f.maxHoursPerWeek;
                    return { 
                      id: f.id, 
-                     name: f.name, 
+                     name: `${f.name} (${f.id})`, 
                      sub: `${f.department} · Limit: ${f.maxHoursPerWeek}h`,
                      extra: <span className={`text-[9px] font-bold px-1 border ${isCritical ? 'bg-red-50 text-red-600 border-red-300' : 'bg-green-50 text-green-600 border-green-300'}`}>{load.toFixed(1)}h</span>
                    };

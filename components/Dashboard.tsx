@@ -6,6 +6,7 @@ import {
   LineChart, Line, BarChart, Bar, Tooltip, XAxis, YAxis, CartesianGrid, ResponsiveContainer
 } from 'recharts';
 import { Course, Room, StudentGroup, ScheduleEntry, Clash, Term, Faculty } from '../types';
+import { DataService } from '../services/dataService';
 
 interface DashboardProps {
   courses: Course[];
@@ -18,28 +19,33 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule, clashes, activeTerm, faculties }) => {
-  
+
   const effectiveSchedule = useMemo(() => {
-    return activeTerm 
+    return activeTerm
       ? schedule.filter(s => s.termId === activeTerm.id)
       : schedule;
   }, [schedule, activeTerm]);
 
-  const totalHours = effectiveSchedule.reduce((acc, curr) => acc + (curr.duration || 0), 0);
+  const totalHours = useMemo(() => {
+    return effectiveSchedule.reduce((acc, curr) => {
+      const duration = DataService.getDuration(curr.startTime, curr.endTime);
+      return acc + duration;
+    }, 0);
+  }, [effectiveSchedule]);
 
   const data = [
-    { name: 'Mon', hours: effectiveSchedule.filter(s => s.day === 'Monday').reduce((a, c) => a + (c.duration || 0), 0) },
-    { name: 'Tue', hours: effectiveSchedule.filter(s => s.day === 'Tuesday').reduce((a, c) => a + (c.duration || 0), 0) },
-    { name: 'Wed', hours: effectiveSchedule.filter(s => s.day === 'Wednesday').reduce((a, c) => a + (c.duration || 0), 0) },
-    { name: 'Thu', hours: effectiveSchedule.filter(s => s.day === 'Thursday').reduce((a, c) => a + (c.duration || 0), 0) },
-    { name: 'Fri', hours: effectiveSchedule.filter(s => s.day === 'Friday').reduce((a, c) => a + (c.duration || 0), 0) },
-    { name: 'Sat', hours: effectiveSchedule.filter(s => s.day === 'Saturday').reduce((a, c) => a + (c.duration || 0), 0) },
+    { name: 'Mon', hours: effectiveSchedule.filter(s => s.day === 'Monday').reduce((a, c) => a + DataService.getDuration(c.startTime, c.endTime), 0) },
+    { name: 'Tue', hours: effectiveSchedule.filter(s => s.day === 'Tuesday').reduce((a, c) => a + DataService.getDuration(c.startTime, c.endTime), 0) },
+    { name: 'Wed', hours: effectiveSchedule.filter(s => s.day === 'Wednesday').reduce((a, c) => a + DataService.getDuration(c.startTime, c.endTime), 0) },
+    { name: 'Thu', hours: effectiveSchedule.filter(s => s.day === 'Thursday').reduce((a, c) => a + DataService.getDuration(c.startTime, c.endTime), 0) },
+    { name: 'Fri', hours: effectiveSchedule.filter(s => s.day === 'Friday').reduce((a, c) => a + DataService.getDuration(c.startTime, c.endTime), 0) },
+    { name: 'Sat', hours: effectiveSchedule.filter(s => s.day === 'Saturday').reduce((a, c) => a + DataService.getDuration(c.startTime, c.endTime), 0) },
   ];
 
   const facultyData = useMemo(() => {
     if (!faculties) return [];
     return faculties.map(f => {
-      const load = effectiveSchedule.filter(s => s.facultyId === f.id).reduce((acc, curr) => acc + (curr.duration || 0), 0);
+      const load = effectiveSchedule.filter(s => s.facultyId === f.id).reduce((acc, curr) => acc + DataService.getDuration(curr.startTime, curr.endTime), 0);
       return {
         name: f.name.split(' ').pop(), // Last name for brevity
         fullName: f.name,

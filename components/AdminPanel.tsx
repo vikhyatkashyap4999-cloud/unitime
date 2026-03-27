@@ -26,9 +26,10 @@ interface AdminPanelProps {
   onUpdateUsers: (users: UserAccount[]) => void;
   currentUser: UserAccount;
   onFullSync: () => Promise<void>;
+  onWipeAllData: () => Promise<void>;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUser, onFullSync }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUser, onFullSync, onWipeAllData }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -142,6 +143,7 @@ CREATE TABLE IF NOT EXISTS public.terms (
 
 CREATE TABLE IF NOT EXISTS public.courses (
     id TEXT PRIMARY KEY,
+    "termId" TEXT,
     code TEXT NOT NULL,
     name TEXT NOT NULL,
     credits NUMERIC NOT NULL,
@@ -153,6 +155,7 @@ CREATE TABLE IF NOT EXISTS public.courses (
 
 CREATE TABLE IF NOT EXISTS public.faculties (
     id TEXT PRIMARY KEY,
+    "termId" TEXT,
     name TEXT NOT NULL,
     department TEXT NOT NULL,
     availability TEXT[] DEFAULT '{}',
@@ -161,6 +164,7 @@ CREATE TABLE IF NOT EXISTS public.faculties (
 
 CREATE TABLE IF NOT EXISTS public.rooms (
     id TEXT PRIMARY KEY,
+    "termId" TEXT,
     name TEXT NOT NULL,
     capacity NUMERIC NOT NULL,
     type TEXT NOT NULL
@@ -168,6 +172,7 @@ CREATE TABLE IF NOT EXISTS public.rooms (
 
 CREATE TABLE IF NOT EXISTS public.groups (
     id TEXT PRIMARY KEY,
+    "termId" TEXT,
     name TEXT NOT NULL,
     program TEXT NOT NULL,
     semester NUMERIC NOT NULL,
@@ -399,6 +404,13 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
                     className="w-full py-2 bg-[#f0f0f0] border-2 border-[#185baf] text-[#185baf] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-white transition-colors"
                   >
                      <CloudLightning className="w-4 h-4" /> REPAIR DATABASE CONNECTIONS
+                  </button>
+
+                  <button 
+                    onClick={onWipeAllData}
+                    className="w-full py-2 bg-red-50 border-2 border-red-600 text-red-600 font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-red-600 hover:text-white transition-all shadow-[2px_2px_0_#991b1b]"
+                  >
+                     <Trash2 className="w-4 h-4" /> FACTORY RESET / PURGE DATA
                   </button>
                 </div>
              </div>
