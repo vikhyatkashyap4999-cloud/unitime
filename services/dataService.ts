@@ -115,7 +115,7 @@ export class DataService {
           users: ['id', 'username', 'password', 'name', 'role', 'departmentScope', 'lastLogin'],
           terms: ['id', 'name', 'startDate', 'endDate', 'academicYear', 'isActive'],
           courses: ['id', 'termId', 'code', 'name', 'credits', 'department', 'duration', 'type', 'color'],
-          faculties: ['id', 'termId', 'name', 'department', 'availability', 'maxHoursPerWeek'],
+          faculties: ['id', 'facultyId', 'termId', 'name', 'department', 'availability', 'maxHoursPerWeek'],
           rooms: ['id', 'termId', 'name', 'capacity', 'type'],
           groups: ['id', 'termId', 'name', 'program', 'semester', 'studentCount'],
           schedule: ['id', 'termId', 'courseId', 'facultyId', 'roomId', 'groupIds', 'day', 'startTime', 'endTime', 'departmentId', 'weeks', 'category']

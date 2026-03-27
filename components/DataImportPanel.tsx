@@ -76,6 +76,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         if (activeImportType === 'Faculties') {
           return {
             id: item._staff_id || item._Faculty_ID || `f-${Date.now()}-${i}`,
+            facultyId: item._Faculty_ID || item._staff_id,
             name: item._Faculty_name || 'Unknown Faculty',
             department: item._deptName || 'General',
             email: item._email || '',
@@ -165,6 +166,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     } else if (activeTab === 'Faculties') {
       const item: any = { 
         id: newItem._staff_id || `f-${Date.now()}`, 
+        facultyId: newItem._Faculty_ID || newItem._staff_id,
         name: newItem._Faculty_name || 'New Faculty', 
         department: newItem._deptName || 'General', 
         email: newItem._email,

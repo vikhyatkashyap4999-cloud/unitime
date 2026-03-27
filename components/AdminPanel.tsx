@@ -155,6 +155,7 @@ CREATE TABLE IF NOT EXISTS public.courses (
 
 CREATE TABLE IF NOT EXISTS public.faculties (
     id TEXT PRIMARY KEY,
+    "facultyId" TEXT,
     "termId" TEXT,
     name TEXT NOT NULL,
     department TEXT NOT NULL,

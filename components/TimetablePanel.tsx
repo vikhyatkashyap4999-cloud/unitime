@@ -91,7 +91,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
     if (viewType === 'Room') return rooms.find(r => r.id === viewId)?.name;
     if (viewType === 'Faculty') {
       const f = faculties.find(f => f.id === viewId);
-      return f ? `${f.name} (${f.id})` : undefined;
+      return f ? `${f.name} (${f.facultyId || f.id})` : undefined;
     }
     if (viewType === 'Group') return groups.find(g => g.id === viewId)?.name;
     if (viewType === 'Course') {
@@ -331,7 +331,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                           onClick={() => { onUpdateView?.(viewType, opt.id); setIsSelectorOpen(false); setSearchQuery(''); }} 
                           className={`w-full text-left px-3 py-2 text-xs font-bold transition-all border border-transparent mb-0.5 ${viewId === opt.id ? 'bg-[#185baf] text-white border-[#0d47a1]' : 'hover:bg-[#f0f0f0] hover:border-[#ccc] text-[#333]'}`}
                         >
-                          {viewType === 'Faculty' ? `${opt.name} (${opt.id})` : opt.name}
+                          {viewType === 'Faculty' ? `${opt.name} (${faculties.find(f => f.id === opt.id)?.facultyId || opt.id})` : opt.name}
                         </button>
                       ))
                     ) : (
@@ -499,7 +499,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                                           <span>
                                             {(() => {
                                               const f = faculties.find(f => f.id === entry.facultyId);
-                                              return f ? `${f.name} (${f.id})` : 'No Staff';
+                                              return f ? `${f.name} (${f.facultyId || f.id})` : 'No Staff';
                                             })()}
                                           </span>
                                        </div>
@@ -517,7 +517,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                                         ? (groups.filter(g => entry.groupIds?.includes(g.id)).map(g => g.name).join(', ') || 'No Cohort')
                                         : (() => {
                                             const f = faculties.find(f => f.id === entry.facultyId);
-                                            return f ? `${f.name} (${f.id})` : 'No Staff';
+                                            return f ? `${f.name} (${f.facultyId || f.id})` : 'No Staff';
                                           })()}
                                     </span>
                                     <span className="text-[8px] font-bold bg-white/20 px-1 py-0.5 leading-none">

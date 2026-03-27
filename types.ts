@@ -45,6 +45,7 @@ export interface Course {
 export interface Faculty {
   id: string;
   termId?: string;
+  facultyId?: string;
   name: string;
   department: string;
   availability: string[];
