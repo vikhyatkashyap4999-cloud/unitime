@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Component } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import TopNav from './components/TopNav';
 import Dashboard from './components/Dashboard';
@@ -55,7 +55,10 @@ const App: React.FC = () => {
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRoomToolOpen, setIsRoomToolOpen] = useState(false);
-  const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(!!supabase);
+  const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(() => {
+    const isSkipped = localStorage.getItem('unitime_skip_supabase') === 'true';
+    return !!supabase || isSkipped;
+  });
 
 
   const [viewingTermId, setViewingTermId] = useState<string | null>(null);
@@ -670,4 +673,52 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+// Error Boundary Component
+class ErrorBoundary extends Component<any, any> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("CRITICAL UI ERROR:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 text-white font-sans">
+          <div className="max-w-md w-full bg-slate-800 border-2 border-red-500 p-8 shadow-2xl">
+            <h1 className="text-2xl font-black uppercase tracking-tighter text-red-500 mb-4">System Identity Failure</h1>
+            <p className="text-sm text-slate-300 mb-6 font-bold leading-relaxed uppercase tracking-wider">
+              A critical runtime error has occurred in the application engine.
+            </p>
+            <div className="bg-black/50 p-4 font-mono text-[10px] text-red-400 mb-6 border border-red-900/50">
+              Error type: DOM_INITIALIZATION_EXHAUSTED
+            </div>
+            <button 
+              onClick={() => {
+                localStorage.clear();
+                window.location.reload();
+              }}
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-black py-3 uppercase tracking-widest text-xs transition-colors"
+            >
+              Reset Local Engine & Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (this as any).props.children;
+  }
+}
+
+const AppWrapper: React.FC = () => (
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);
+
+export default AppWrapper;

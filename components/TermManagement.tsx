@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Term, UserAccount, Role } from '../types';
 import { Calendar, Plus, CheckCircle2, AlertCircle, Clock, Trash2, Edit2, X, CalendarDays } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface TermManagementProps {
   terms: Term[];

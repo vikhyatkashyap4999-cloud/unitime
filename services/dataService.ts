@@ -21,7 +21,14 @@ export class DataService {
     }
 
     const saved = localStorage.getItem(this.STORAGE_KEY);
-    const entries = saved ? JSON.parse(saved) : [];
+    let entries: ScheduleEntry[] = [];
+    try {
+      entries = saved ? JSON.parse(saved) : [];
+      if (!Array.isArray(entries)) entries = [];
+    } catch {
+      entries = [];
+    }
+    
     if (termId) {
       return entries.filter((e: ScheduleEntry) => e.termId === termId);
     }
@@ -82,7 +89,8 @@ export class DataService {
     
     const saved = localStorage.getItem(storageKey);
     try {
-      const data = saved ? JSON.parse(saved) : defaultValue;
+      let data = saved ? JSON.parse(saved) : defaultValue;
+      if (!Array.isArray(data)) data = defaultValue;
       if (termId && tableName !== 'users' && tableName !== 'terms') {
         return data.filter((item: any) => item.termId === termId || !item.termId);
       }
@@ -158,9 +166,17 @@ export class DataService {
   }
 
   static getDuration(start: string, end: string): number {
-    const [sH, sM] = start.split(':').map(Number);
-    const [eH, eM] = end.split(':').map(Number);
-    return (eH + eM / 60) - (sH + sM / 60);
+    if (!start || !end || !start.includes(':') || !end.includes(':')) {
+      return 0;
+    }
+    try {
+      const [sH, sM] = start.split(':').map(Number);
+      const [eH, eM] = end.split(':').map(Number);
+      const duration = (eH + eM / 60) - (sH + sM / 60);
+      return isNaN(duration) ? 0 : Math.max(0, duration);
+    } catch {
+      return 0;
+    }
   }
 
   static detectConflicts(schedule: ScheduleEntry[], facultyList: Faculty[] = []): Clash[] {
@@ -171,16 +187,17 @@ export class DataService {
     const loadTracker = new Map<string, number>();
 
     for (const entry of schedule) {
-      const weeks = entry.weeks || [];
-      const duration = this.getDuration(entry.startTime, entry.endTime);
+      const weeks = Array.isArray(entry.weeks) ? entry.weeks : [];
+      const duration = DataService.getDuration(entry.startTime, entry.endTime);
       
       for (const week of weeks) {
+        if (!entry.day || !entry.startTime) continue;
         const baseKey = `${week}-${entry.day}-${entry.startTime}`;
         
         const roomKey = `${baseKey}-room-${entry.roomId}`;
-        if (roomMap.has(roomKey)) {
+        if (entry.roomId && roomMap.has(roomKey)) {
           clashes.push({ type: 'Room', message: `Room Conflict @ ${entry.day} ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, roomMap.get(roomKey)!] });
-        } else {
+        } else if (entry.roomId) {
           roomMap.set(roomKey, entry.id);
         }
 

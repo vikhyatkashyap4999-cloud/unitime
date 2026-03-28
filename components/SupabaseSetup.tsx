@@ -31,15 +31,20 @@ const SupabaseSetup: React.FC<SupabaseSetupProps> = ({ onConfigured }) => {
     }
   };
 
+  const handleSkip = () => {
+    localStorage.setItem('unitime_skip_supabase', 'true');
+    onConfigured('', '');
+  };
+
   return (
-    <div className="min-h-screen bg-[#008080] flex items-center justify-center p-6">
-      <div className="wf w-full max-w-md shadow-2xl">
-        <div className="wtb tb-blue">
-          <span className="wico">☁️</span>
-          <span className="wtit uppercase tracking-widest text-[10px]">Supabase Cloud Configuration</span>
+    <div className="min-h-screen bg-[#008080] flex items-center justify-center p-6 font-sans">
+      <div className="w-full max-w-md bg-[#ECECEC] shadow-2xl border-2 border-[#185baf]">
+        <div className="bg-[#185baf] text-white px-3 py-1.5 flex items-center gap-2">
+          <span className="text-lg">☁️</span>
+          <span className="text-[10px] font-bold uppercase tracking-widest">Supabase Cloud Configuration</span>
         </div>
         
-        <div className="p-6 bg-[#ECECEC] space-y-6">
+        <div className="p-6 space-y-6">
           <div className="text-center space-y-2">
             <div className="w-16 h-16 bg-white border-2 border-slate-300 shadow-inner rounded-full flex items-center justify-center mx-auto mb-4">
               <Database className="w-8 h-8 text-blue-700" />
@@ -58,7 +63,7 @@ const SupabaseSetup: React.FC<SupabaseSetupProps> = ({ onConfigured }) => {
               <input 
                 type="text" 
                 placeholder="https://your-project.supabase.co"
-                className="wi w-full"
+                className="w-full bg-white border-2 border-[#ccc] px-2 py-1.5 text-xs font-bold outline-none focus:border-[#185baf] text-[#333]"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
               />
@@ -70,7 +75,7 @@ const SupabaseSetup: React.FC<SupabaseSetupProps> = ({ onConfigured }) => {
               </label>
               <textarea 
                 placeholder="your-anon-key"
-                className="wi w-full h-20 resize-none font-mono text-[9px]"
+                className="w-full bg-white border-2 border-[#ccc] px-2 py-1.5 text-[10px] font-mono h-20 resize-none outline-none focus:border-[#185baf] text-[#333]"
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
               />
@@ -87,7 +92,7 @@ const SupabaseSetup: React.FC<SupabaseSetupProps> = ({ onConfigured }) => {
               <button 
                 onClick={handleConnect}
                 disabled={status === 'testing' || status === 'success'}
-                className="wb add w-full flex items-center justify-center gap-2 py-2"
+                className="w-full bg-[#185baf] text-white px-5 py-2 text-[11px] font-bold uppercase tracking-widest border border-[#0d3b76] hover:bg-[#124584] shadow-[2px_2px_0_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all flex items-center justify-center gap-2"
               >
                 {status === 'testing' ? (
                   <>
@@ -108,8 +113,8 @@ const SupabaseSetup: React.FC<SupabaseSetupProps> = ({ onConfigured }) => {
               </button>
               
               <button 
-                onClick={() => onConfigured('', '')}
-                className="wb w-full text-[10px]"
+                onClick={handleSkip}
+                className="w-full bg-white text-[#333] px-5 py-2 text-[11px] font-bold uppercase tracking-widest border border-[#ccc] hover:bg-[#f2f2f2] shadow-[2px_2px_0_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.8)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
               >
                 Continue with Local Storage Only
               </button>

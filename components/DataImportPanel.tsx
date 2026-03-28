@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { BookOpen, User, Users, MapPin, Download, Upload, CheckCircle2, RefreshCcw, FileText, Database, Plus, Trash2 } from 'lucide-react';
 import { Course, Faculty, Room, StudentGroup } from '../types';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface DataImportPanelProps {
   courses: Course[];
