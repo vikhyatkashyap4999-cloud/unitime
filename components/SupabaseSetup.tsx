@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { Database, ExternalLink, CheckCircle2, AlertCircle, Copy, Save } from 'lucide-react';
 
 interface SupabaseSetupProps {
