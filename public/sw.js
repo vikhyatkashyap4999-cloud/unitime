@@ -1,10 +1,8 @@
-const CACHE_NAME = 'unitime-v2'; // Incrementing to force update
+const CACHE_NAME = 'unitime-v3'; // Incrementing to force update
 const STATIC_ASSETS = [
   '/',
-  '/index.html',
   '/pwa-icon.png',
-  '/manifest.json',
-  '/index.css'
+  '/manifest.json'
 ];
 
 // Install: Cache static assets
@@ -12,10 +10,13 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       console.log('[SW] Pre-caching static assets');
-      return cache.addAll(STATIC_ASSETS);
+      // Use map to catch individual failures so the whole install doesn't crash
+      return Promise.allSettled(
+        STATIC_ASSETS.map(url => cache.add(url))
+      );
     })
   );
-  self.skipWaiting(); // Force update
+  self.skipWaiting();
 });
 
 // Activate: Clean up old caches
