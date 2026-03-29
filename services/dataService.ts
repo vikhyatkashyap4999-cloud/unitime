@@ -81,7 +81,16 @@ export class DataService {
         }
         const { data, error } = await query;
         if (!error && data) return data as T[];
-        if (error) console.warn(`Supabase load error for ${tableName}:`, error);
+        
+        // If error is about missing termId column, try without filter
+        if (error && (error.message.includes('column "termId"') || error.code === '42703')) {
+          console.warn(`Column "termId" missing for ${tableName}. Retrying without filter...`);
+          const { data: fallbackData, error: fallbackError } = await supabase.from(tableName).select('*');
+          if (!fallbackError && fallbackData) return fallbackData as T[];
+          if (fallbackError) console.error(`Fallback select failed for ${tableName}:`, fallbackError);
+        } else if (error) {
+          console.warn(`Supabase load error for ${tableName}:`, error);
+        }
       }
     } catch (err) {
       console.error(`DataService.loadEntity(${tableName}) crash:`, err);
@@ -151,9 +160,22 @@ export class DataService {
 
         const { error: insertError } = await supabase.from(tableName).insert(sanitizedData);
         if (insertError) {
-          console.error(`Failed to insert ${tableName} into Supabase:`, insertError);
-          const msg = `Supabase Sync Error (${tableName}): ${insertError.message}`;
-          alert(msg);
+          // If the error is about a missing column 'termId', try to insert without it
+          if (insertError.message.includes('column "termId" of relation') || insertError.code === '42703') {
+            console.warn(`Column "termId" missing for ${tableName}. Retrying without termId...`);
+            const fallbackData = sanitizedData.map((item: any) => {
+              const { termId, ...rest } = item;
+              return rest;
+            });
+            const { error: retryError } = await supabase.from(tableName).insert(fallbackData);
+            if (retryError) {
+              console.error(`Retry failed for ${tableName}:`, retryError);
+            }
+          } else {
+            console.error(`Failed to insert ${tableName} into Supabase:`, insertError);
+            const msg = `Supabase Sync Error (${tableName}): ${insertError.message}`;
+            alert(msg);
+          }
         } else {
           console.log(`Successfully synced ${tableName} to Supabase.`);
         }
