@@ -164,6 +164,8 @@ const App: React.FC = () => {
       const debounceTimers: Record<string, any> = {};
       const debouncedRefresh = (tableName: string, refreshFn: () => Promise<void>) => {
         if (debounceTimers[tableName]) clearTimeout(debounceTimers[tableName]);
+        // ✅ FIX: 3s debounce — gives Supabase enough time to commit all 500-row batches
+        //         before the realtime listener re-fetches and sees the complete dataset.
         debounceTimers[tableName] = setTimeout(async () => {
           if (!isSyncingRef.current) {
             console.log(`Refreshing ${tableName} from Supabase...`);
@@ -171,7 +173,7 @@ const App: React.FC = () => {
           } else {
             console.log(`Skipping refresh for ${tableName} (write in progress)`);
           }
-        }, 1500);
+        }, 3000);
       };
 
       const channel = supabase.channel('realtime_sync')
@@ -195,26 +197,28 @@ const App: React.FC = () => {
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, async () => {
           debouncedRefresh('courses', async () => {
+            // ✅ FIX: Always apply the update — removed "if (c.length > 0)" guard
+            // that was preventing genuine wipes from propagating to other users' screens.
             const c = await DataService.loadEntity<Course>('courses', 'unitime_courses', [], activeTermIdRef.current);
-            if (c.length > 0) setCourses(c);
+            setCourses(c);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' }, async () => {
           debouncedRefresh('faculties', async () => {
             const f = await DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], activeTermIdRef.current);
-            if (f.length > 0) setFaculties(f);
+            setFaculties(f);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, async () => {
           debouncedRefresh('rooms', async () => {
             const r = await DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], activeTermIdRef.current);
-            if (r.length > 0) setRooms(r);
+            setRooms(r);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, async () => {
           debouncedRefresh('groups', async () => {
             const g = await DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], activeTermIdRef.current);
-            if (g.length > 0) setGroups(g);
+            setGroups(g);
           });
         })
         .subscribe();
@@ -239,8 +243,8 @@ const App: React.FC = () => {
       await fn();
     } finally {
       setIsSyncing(false);
-      // Keep blocking realtime re-fetches until the 1.5s debounce timer has expired + buffer
-      setTimeout(() => { isSyncingRef.current = false; }, 2000);
+      // ✅ FIX: Keep blocking for 4s — 3s debounce + 1s buffer for Supabase commit lag
+      setTimeout(() => { isSyncingRef.current = false; }, 4000);
     }
   };
 
@@ -722,7 +726,7 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
-          {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} />}
+          {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} onDeleteEntry={handleDeleteSession} />}
           {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
           {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
           {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} onWipeAllData={handleWipeAllData} />}
