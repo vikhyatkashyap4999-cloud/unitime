@@ -1,24 +1,20 @@
 
-import React, { useState, useEffect } from 'react';
-import { UserAccount, Role } from '../types';
-import { 
-  UserPlus, 
-  Shield, 
-  User, 
+import React, { useState } from 'react';
+import { UserAccount, Role, ScheduleEntry, Course, Faculty, Room, StudentGroup } from '../types';
+import {
+  UserPlus,
+  Shield,
   Users,
-  Trash2, 
-  Edit2, 
-  CheckCircle2, 
-  Search, 
-  X, 
-  Lock, 
-  Server, 
-  Globe, 
-  Database, 
+  Trash2,
+  Edit2,
+  CheckCircle2,
+  Search,
+  Server,
+  Database,
   Save,
-  ArrowRight,
   CloudLightning,
-  CreditCard
+  Calendar,
+  AlertTriangle
 } from 'lucide-react';
 
 interface AdminPanelProps {
@@ -27,9 +23,17 @@ interface AdminPanelProps {
   currentUser: UserAccount;
   onFullSync: () => Promise<void>;
   onWipeAllData: () => Promise<void>;
+  schedule: ScheduleEntry[];
+  courses: Course[];
+  faculties: Faculty[];
+  rooms: Room[];
+  groups: StudentGroup[];
+  activeTermId?: string;
+  activeTermName?: string;
+  onClearSchedule: () => Promise<void>;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUser, onFullSync, onWipeAllData }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUser, onFullSync, onWipeAllData, schedule, courses, faculties, rooms, groups, activeTermId, activeTermName, onClearSchedule }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -331,6 +335,77 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+
+          {/* ── Schedule Management Panel ─────────────────────────────── */}
+          <div className="bg-[#f0f0f0] border-2 border-[#185baf] shadow-md flex flex-col">
+            <div className="bg-[#185baf] text-white px-3 py-1.5 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4" />
+                <span className="text-[11px] font-bold tracking-wide uppercase">Timetable Entries</span>
+                <span className="bg-white text-[#185baf] text-[9px] font-black px-1.5 py-0.5 ml-1">
+                  {schedule.filter((e: any) => e.termId === activeTermId).length} entries
+                  {activeTermName ? ` — ${activeTermName}` : ''}
+                </span>
+              </div>
+              <button
+                onClick={onClearSchedule}
+                className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 text-[9px] font-black uppercase tracking-widest border border-red-800 transition-colors"
+              >
+                <Trash2 className="w-3 h-3" /> Clear All Entries
+              </button>
+            </div>
+
+            {/* Entries table */}
+            <div className="overflow-y-auto custom-scrollbar" style={{ maxHeight: 320 }}>
+              {schedule.filter((e: any) => e.termId === activeTermId).length === 0 ? (
+                <div className="p-6 text-center">
+                  <AlertTriangle className="w-6 h-6 text-[#999] mx-auto mb-2" />
+                  <p className="text-[10px] font-bold text-[#999] uppercase tracking-widest">No timetable entries for this term</p>
+                </div>
+              ) : (
+                <table className="w-full text-left border-collapse">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="bg-[#e8e8e8] border-b-2 border-[#ccc]">
+                      {['Day', 'Time', 'Module', 'Faculty', 'Room', 'Groups', 'Type'].map(h => (
+                        <th key={h} className="px-2 py-1.5 text-[9px] font-black text-[#555] uppercase tracking-wider whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {schedule
+                      .filter((e: any) => e.termId === activeTermId)
+                      .sort((a, b) => {
+                        const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+                        if (a.day !== b.day) return days.indexOf(a.day) - days.indexOf(b.day);
+                        return a.startTime.localeCompare(b.startTime);
+                      })
+                      .map((entry, idx) => {
+                        const course = courses.find(c => c.id === entry.courseId);
+                        const faculty = faculties.find(f => f.id === entry.facultyId);
+                        const room = rooms.find(r => r.id === entry.roomId);
+                        const entryGroups = groups.filter(g => entry.groupIds?.includes(g.id)).map(g => g.name).join(', ');
+                        return (
+                          <tr key={entry.id} className={`border-b border-[#eee] ${idx % 2 === 0 ? 'bg-white' : 'bg-[#f8f8f8]'} hover:bg-blue-50`}>
+                            <td className="px-2 py-1 text-[10px] font-bold text-[#333] whitespace-nowrap">{entry.day}</td>
+                            <td className="px-2 py-1 text-[10px] font-mono text-[#555] whitespace-nowrap">{entry.startTime}–{entry.endTime}</td>
+                            <td className="px-2 py-1 text-[10px] font-bold text-[#185baf] max-w-[180px] truncate" title={course ? `${course.code}: ${course.name}` : entry.courseId}>
+                              {course ? `${course.code}` : <span className="text-[#999]">—</span>}
+                            </td>
+                            <td className="px-2 py-1 text-[10px] text-[#444] max-w-[120px] truncate" title={faculty?.name}>{faculty?.name || <span className="text-[#999]">—</span>}</td>
+                            <td className="px-2 py-1 text-[10px] text-[#444] whitespace-nowrap">{room?.name || <span className="text-[#999]">—</span>}</td>
+                            <td className="px-2 py-1 text-[10px] text-[#444] max-w-[140px] truncate" title={entryGroups}>{entryGroups || <span className="text-[#999]">—</span>}</td>
+                            <td className="px-2 py-1">
+                              <span className="text-[8px] font-black uppercase px-1 py-0.5 bg-[#e0e0e0] text-[#555] border border-[#ccc]">{entry.category || 'Theory'}</span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    }
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
 

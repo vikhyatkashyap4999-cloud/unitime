@@ -153,6 +153,29 @@ export class DataService {
     }
   }
 
+  // Wipe all schedule entries for a term (or all terms if no termId).
+  // Used by admin "Clear Schedule" — does NOT call saveEntries so it won't
+  // re-upload the old full array; it just deletes the rows directly.
+  static async clearSchedule(termId?: string): Promise<void> {
+    try {
+      const saved = localStorage.getItem(this.STORAGE_KEY);
+      let entries: ScheduleEntry[] = saved ? JSON.parse(saved) : [];
+      entries = termId ? entries.filter((e: any) => e.termId !== termId) : [];
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(entries));
+    } catch {}
+
+    if (!supabase) return;
+    try {
+      const { error } = termId
+        ? await supabase.from('schedule').delete().eq('termId', termId)
+        : await supabase.from('schedule').delete().neq('id', '');
+      if (error) throw new Error(error.message);
+      console.log(`Schedule cleared${termId ? ` for term ${termId}` : ' (all terms)'}.`);
+    } catch (err) {
+      throw err;
+    }
+  }
+
   // =========================================================
   // GENERIC ENTITY LOAD
   // =========================================================

@@ -105,6 +105,18 @@ const App: React.FC = () => {
   // (realtime callbacks are set up once and would otherwise close over the mount-time value).
   const activeTermIdRef = useRef<string | undefined>(undefined);
 
+  // ✅ FIX: Mirror of `schedule` state as a ref.
+  // Handlers like handleSaveSession close over the React state value at render time.
+  // When two saves fire before React re-renders, the second sees the old `schedule = []`
+  // and setSchedule([entryB]) silently drops entryA. Using the ref gives always-current value.
+  const scheduleRef = useRef<ScheduleEntry[]>([]);
+
+  // Update both state and ref in one call — use this everywhere instead of bare setSchedule.
+  const setScheduleAndRef = (s: ScheduleEntry[]) => {
+    scheduleRef.current = s;
+    setSchedule(s);
+  };
+
   // ✅ FIX: effectiveActiveTerm moved here, BEFORE the useEffect that references it.
   // Previously it was declared after the hooks (line 543), causing a
   // "Cannot access before initialization" crash in the bundled output.
@@ -147,7 +159,7 @@ const App: React.FC = () => {
         setFaculties(f);
         setRooms(r);
         setGroups(g);
-        setSchedule(s);
+        setScheduleAndRef(s);
       } catch (err) {
         console.error('Initial data loading failed:', err);
       } finally {
@@ -180,7 +192,7 @@ const App: React.FC = () => {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
           debouncedRefresh('schedule', async () => {
             const s = await DataService.loadAllEntries(activeTermIdRef.current);
-            setSchedule(s);
+            setScheduleAndRef(s);
           });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, async () => {
@@ -243,8 +255,8 @@ const App: React.FC = () => {
       await fn();
     } finally {
       setIsSyncing(false);
-      // ✅ FIX: Keep blocking for 4s — 3s debounce + 1s buffer for Supabase commit lag
-      setTimeout(() => { isSyncingRef.current = false; }, 4000);
+      // 2s: expires BEFORE the 3s debounce fires, so own-write refresh always runs correctly
+      setTimeout(() => { isSyncingRef.current = false; }, 2000);
     }
   };
 
@@ -281,34 +293,33 @@ const App: React.FC = () => {
       departmentId: currentUser?.departmentScope === 'All' ? 'CS' : (currentUser?.departmentScope || 'General')
     }));
     await withSync(async () => {
-      const updatedSchedule = [...schedule, ...entries];
-      setSchedule(updatedSchedule);
-      // Granular: only INSERT the new rows — never touches other users' entries
+      // Use scheduleRef.current (not schedule state) — avoids stale closure when two
+      // saves fire before React re-renders and the second would overwrite the first.
+      const updatedSchedule = [...scheduleRef.current, ...entries];
+      setScheduleAndRef(updatedSchedule);
       await DataService.addEntries(entries, updatedSchedule);
     });
   };
 
   const handleDeleteSession = async (id: string) => {
     await withSync(async () => {
-      const updatedSchedule = schedule.filter(s => s.id !== id);
-      setSchedule(updatedSchedule);
-      // Granular: only DELETE this specific row
+      const updatedSchedule = scheduleRef.current.filter(s => s.id !== id);
+      setScheduleAndRef(updatedSchedule);
       await DataService.deleteEntry(id, updatedSchedule);
     });
   };
 
   const handleUpdateSession = async (updatedEntry: ScheduleEntry) => {
     await withSync(async () => {
-      const updatedSchedule = schedule.map(s => s.id === updatedEntry.id ? updatedEntry : s);
-      setSchedule(updatedSchedule);
-      // Granular: only UPSERT this specific row
+      const updatedSchedule = scheduleRef.current.map(s => s.id === updatedEntry.id ? updatedEntry : s);
+      setScheduleAndRef(updatedSchedule);
       await DataService.updateEntry(updatedEntry, updatedSchedule);
     });
   };
 
   const handleMoveSession = async (entryId: string, newDay: any, newStartTime: string) => {
     await withSync(async () => {
-      const entry = schedule.find(s => s.id === entryId);
+      const entry = scheduleRef.current.find(s => s.id === entryId);
       if (entry) {
         const [sh, sm] = entry.startTime.split(':').map(Number);
         const [eh, em] = entry.endTime.split(':').map(Number);
@@ -321,9 +332,8 @@ const App: React.FC = () => {
         const newEndTime = `${String(neh).padStart(2, '0')}:${String(nem).padStart(2, '0')}`;
 
         const updatedEntry = { ...entry, day: newDay, startTime: newStartTime, endTime: newEndTime };
-        const updatedSchedule = schedule.map(s => s.id === entryId ? updatedEntry : s);
-        setSchedule(updatedSchedule);
-        // Granular: only UPSERT this specific row
+        const updatedSchedule = scheduleRef.current.map(s => s.id === entryId ? updatedEntry : s);
+        setScheduleAndRef(updatedSchedule);
         await DataService.updateEntry(updatedEntry, updatedSchedule);
       }
     });
@@ -332,9 +342,8 @@ const App: React.FC = () => {
   const handleDuplicateSession = async (entry: ScheduleEntry) => {
     await withSync(async () => {
       const duplicatedEntry: ScheduleEntry = { ...entry, id: `s-${Date.now()}-dup` };
-      const updatedSchedule = [...schedule, duplicatedEntry];
-      setSchedule(updatedSchedule);
-      // Granular: only INSERT the duplicated row
+      const updatedSchedule = [...scheduleRef.current, duplicatedEntry];
+      setScheduleAndRef(updatedSchedule);
       await DataService.addEntries([duplicatedEntry], updatedSchedule);
     });
   };
@@ -397,7 +406,7 @@ const App: React.FC = () => {
       }
       
       // Clear local state
-      setSchedule([]);
+      setScheduleAndRef([]);
       setCourses([]);
       setFaculties([]);
       setRooms([]);
@@ -415,7 +424,27 @@ const App: React.FC = () => {
       alert('Reset Failed: ' + (err.message || 'Unknown error.'));
     }
     setIsSyncing(false);
-    setTimeout(() => { isSyncingRef.current = false; }, 3000);
+    setTimeout(() => { isSyncingRef.current = false; }, 2000);
+  };
+
+  // Admin: delete all schedule entries for the active term only.
+  const handleClearSchedule = async () => {
+    const termEntries = scheduleRef.current.filter((e: any) => e.termId === effectiveActiveTerm?.id);
+    const termName = effectiveActiveTerm?.name || effectiveActiveTerm?.id || 'active term';
+    if (!confirm(`Delete ALL ${termEntries.length} timetable entries for "${termName}"? This cannot be undone.`)) return;
+    isSyncingRef.current = true;
+    setIsSyncing(true);
+    try {
+      await DataService.clearSchedule(effectiveActiveTerm?.id);
+      // Remove only this term's entries from local state, keep other terms intact
+      const remaining = scheduleRef.current.filter((e: any) => e.termId !== effectiveActiveTerm?.id);
+      setScheduleAndRef(remaining);
+    } catch (err: any) {
+      alert('Failed to clear schedule: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => { isSyncingRef.current = false; }, 2000);
+    }
   };
 
   const handleFullSync = async () => {
@@ -729,7 +758,7 @@ const App: React.FC = () => {
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} onDeleteEntry={handleDeleteSession} />}
           {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
           {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
-          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} onWipeAllData={handleWipeAllData} />}
+          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} onWipeAllData={handleWipeAllData} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} />}
         </div>
       </main>
 
