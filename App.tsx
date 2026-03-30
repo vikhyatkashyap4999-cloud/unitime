@@ -160,17 +160,18 @@ const App: React.FC = () => {
     if (supabase) {
       // ✅ FIX: All callbacks read activeTermIdRef.current at the time they fire,
       // NOT the stale value captured when the effect first ran (which was the mock termId).
-      let debounceTimer: any = null;
+      // Per-table debounce timers — a change to 'schedule' won't delay a refresh of 'courses'.
+      const debounceTimers: Record<string, any> = {};
       const debouncedRefresh = (tableName: string, refreshFn: () => Promise<void>) => {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(async () => {
+        if (debounceTimers[tableName]) clearTimeout(debounceTimers[tableName]);
+        debounceTimers[tableName] = setTimeout(async () => {
           if (!isSyncingRef.current) {
             console.log(`Refreshing ${tableName} from Supabase...`);
             await refreshFn();
           } else {
             console.log(`Skipping refresh for ${tableName} (write in progress)`);
           }
-        }, 2000);
+        }, 1500);
       };
 
       const channel = supabase.channel('realtime_sync')
@@ -238,8 +239,8 @@ const App: React.FC = () => {
       await fn();
     } finally {
       setIsSyncing(false);
-      // Keep blocking realtime re-fetches until the 2s debounce timer has expired
-      setTimeout(() => { isSyncingRef.current = false; }, 3000);
+      // Keep blocking realtime re-fetches until the 1.5s debounce timer has expired + buffer
+      setTimeout(() => { isSyncingRef.current = false; }, 2000);
     }
   };
 
@@ -272,12 +273,14 @@ const App: React.FC = () => {
     const entries: ScheduleEntry[] = newEntries.map((ne, index) => ({
       ...ne,
       id: `s-${Date.now()}-${index}`,
+      termId: ne.termId || effectiveActiveTerm?.id || '',
       departmentId: currentUser?.departmentScope === 'All' ? 'CS' : (currentUser?.departmentScope || 'General')
     }));
     await withSync(async () => {
       const updatedSchedule = [...schedule, ...entries];
       setSchedule(updatedSchedule);
-      await DataService.saveEntries(updatedSchedule, effectiveActiveTerm?.id);
+      // Granular: only INSERT the new rows — never touches other users' entries
+      await DataService.addEntries(entries, updatedSchedule);
     });
   };
 
@@ -285,7 +288,8 @@ const App: React.FC = () => {
     await withSync(async () => {
       const updatedSchedule = schedule.filter(s => s.id !== id);
       setSchedule(updatedSchedule);
-      await DataService.saveEntries(updatedSchedule, effectiveActiveTerm?.id);
+      // Granular: only DELETE this specific row
+      await DataService.deleteEntry(id, updatedSchedule);
     });
   };
 
@@ -293,7 +297,8 @@ const App: React.FC = () => {
     await withSync(async () => {
       const updatedSchedule = schedule.map(s => s.id === updatedEntry.id ? updatedEntry : s);
       setSchedule(updatedSchedule);
-      await DataService.saveEntries(updatedSchedule, effectiveActiveTerm?.id);
+      // Granular: only UPSERT this specific row
+      await DataService.updateEntry(updatedEntry, updatedSchedule);
     });
   };
 
@@ -314,7 +319,8 @@ const App: React.FC = () => {
         const updatedEntry = { ...entry, day: newDay, startTime: newStartTime, endTime: newEndTime };
         const updatedSchedule = schedule.map(s => s.id === entryId ? updatedEntry : s);
         setSchedule(updatedSchedule);
-        await DataService.saveEntries(updatedSchedule, effectiveActiveTerm?.id);
+        // Granular: only UPSERT this specific row
+        await DataService.updateEntry(updatedEntry, updatedSchedule);
       }
     });
   };
@@ -324,7 +330,8 @@ const App: React.FC = () => {
       const duplicatedEntry: ScheduleEntry = { ...entry, id: `s-${Date.now()}-dup` };
       const updatedSchedule = [...schedule, duplicatedEntry];
       setSchedule(updatedSchedule);
-      await DataService.saveEntries(updatedSchedule, effectiveActiveTerm?.id);
+      // Granular: only INSERT the duplicated row
+      await DataService.addEntries([duplicatedEntry], updatedSchedule);
     });
   };
 

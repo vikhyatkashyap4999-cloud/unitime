@@ -92,21 +92,64 @@ export class DataService {
       if (supabase) {
         const sanitized = entries.map(e => this.sanitizeItem('schedule', e, termId || e.termId));
 
-        // Delete-then-upsert: avoids NOT IN URL-length limits for large schedules.
+        // Delete-then-upsert: used for BULK operations only (e.g. term switch, initial seed).
+        // For interactive per-row edits, use addEntries / updateEntry / deleteEntry below.
         if (termId) {
           await supabase.from('schedule').delete().eq('termId', termId);
         }
         if (sanitized.length > 0) {
-          const { error } = await supabase.from('schedule').upsert(sanitized, { onConflict: 'id' });
-          if (error) {
-            console.error('Failed to upsert schedule:', error);
-          } else {
-            console.log(`Schedule synced to Supabase (${sanitized.length} entries).`);
+          const BATCH = 500;
+          for (let i = 0; i < sanitized.length; i += BATCH) {
+            const { error } = await supabase.from('schedule').upsert(sanitized.slice(i, i + BATCH), { onConflict: 'id' });
+            if (error) { console.error('Failed to upsert schedule batch:', error); break; }
           }
+          console.log(`Schedule bulk-synced to Supabase (${sanitized.length} entries).`);
         }
       }
     } catch (err) {
       console.error('DataService.saveEntries crash:', err);
+    }
+  }
+
+  // ── Granular per-row operations (safe for multi-user concurrent editing) ────
+  // These only touch the specific rows that changed, so concurrent users
+  // never overwrite each other's work.
+
+  static async addEntries(newEntries: ScheduleEntry[], allEntries: ScheduleEntry[]): Promise<void> {
+    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(allEntries));
+    if (!supabase || newEntries.length === 0) return;
+    try {
+      const sanitized = newEntries.map(e => this.sanitizeItem('schedule', e, e.termId));
+      const { error } = await supabase.from('schedule').upsert(sanitized, { onConflict: 'id' });
+      if (error) console.error('DataService.addEntries error:', error);
+      else console.log(`Added ${newEntries.length} schedule entry(ies).`);
+    } catch (err) {
+      console.error('DataService.addEntries crash:', err);
+    }
+  }
+
+  static async updateEntry(entry: ScheduleEntry, allEntries: ScheduleEntry[]): Promise<void> {
+    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(allEntries));
+    if (!supabase) return;
+    try {
+      const sanitized = this.sanitizeItem('schedule', entry, entry.termId);
+      const { error } = await supabase.from('schedule').upsert([sanitized], { onConflict: 'id' });
+      if (error) console.error('DataService.updateEntry error:', error);
+      else console.log(`Updated schedule entry ${entry.id}.`);
+    } catch (err) {
+      console.error('DataService.updateEntry crash:', err);
+    }
+  }
+
+  static async deleteEntry(id: string, allEntries: ScheduleEntry[]): Promise<void> {
+    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(allEntries));
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from('schedule').delete().eq('id', id);
+      if (error) console.error('DataService.deleteEntry error:', error);
+      else console.log(`Deleted schedule entry ${id}.`);
+    } catch (err) {
+      console.error('DataService.deleteEntry crash:', err);
     }
   }
 
