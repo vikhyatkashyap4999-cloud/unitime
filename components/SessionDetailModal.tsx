@@ -57,7 +57,9 @@ const SessionDetailModal: React.FC<SessionDetailModalProps> = ({
 
   if (!isOpen || !activeEntry || !editData) return null;
 
-  const course = courses.find(c => c.id === activeEntry.courseId);
+  // When in edit mode, reflect the currently edited courseId so the header updates live.
+  const displayCourseId = isEditing && editData ? editData.courseId : activeEntry.courseId;
+  const course = courses.find(c => c.id === displayCourseId);
   const faculty = faculties.find(f => f.id === activeEntry.facultyId);
   const room = rooms.find(r => r.id === activeEntry.roomId);
   const selectedGroups = groups.filter(g => activeEntry.groupIds.includes(g.id));
@@ -146,6 +148,14 @@ const SessionDetailModal: React.FC<SessionDetailModalProps> = ({
 
             {isEditing ? (
               <div className="space-y-3 bg-white border border-[#ccc] p-3">
+                <SearchableDropdown
+                  label="MODULE"
+                  icon={<BookOpen className="w-3.5 h-3.5" />}
+                  options={courses.map(c => ({ id: c.id, name: `${c.code} — ${c.name}` }))}
+                  value={editData.courseId}
+                  onChange={id => setEditData({ ...editData, courseId: id })}
+                />
+
                 <div className="grid grid-cols-2 gap-4">
                   <SearchableDropdown
                     label="CATEGORY"

@@ -72,25 +72,16 @@ export class DataService {
       if (supabase) {
         const sanitized = entries.map(e => this.sanitizeItem('schedule', e, termId || e.termId));
 
-        // ✅ FIX: Use UPSERT instead of delete+insert to avoid data loss
-        const { error } = await supabase.from('schedule').upsert(sanitized, { onConflict: 'id' });
-        if (error) {
-          console.error('Failed to upsert schedule:', error);
-        } else {
-          console.log('Schedule synced to Supabase.');
-        }
-
-        // Clean up deleted entries from Supabase
+        // Delete-then-upsert: avoids NOT IN URL-length limits for large schedules.
         if (termId) {
-          const currentIds = entries.map(e => e.id);
-          if (currentIds.length > 0) {
-            await supabase.from('schedule')
-              .delete()
-              .eq('termId', termId)
-              .not('id', 'in', `(${currentIds.join(',')})`);
+          await supabase.from('schedule').delete().eq('termId', termId);
+        }
+        if (sanitized.length > 0) {
+          const { error } = await supabase.from('schedule').upsert(sanitized, { onConflict: 'id' });
+          if (error) {
+            console.error('Failed to upsert schedule:', error);
           } else {
-            // All entries deleted for this term
-            await supabase.from('schedule').delete().eq('termId', termId);
+            console.log(`Schedule synced to Supabase (${sanitized.length} entries).`);
           }
         }
       }
@@ -167,68 +158,94 @@ export class DataService {
 
       const sanitized = itemsToSync.map(item => this.sanitizeItem(tableName, item, termId));
 
-      const { error: upsertError } = await supabase
-        .from(tableName)
-        .upsert(sanitized, { onConflict: 'id' });
+      const isTermScoped = !!(termId && tableName !== 'users' && tableName !== 'terms');
 
-      if (upsertError) {
-        // If facultyId column doesn't exist, retry without it
-        if (upsertError.message.includes('facultyId') && tableName === 'faculties') {
-          console.warn('facultyId column missing, retrying without it...');
-          const fallback = sanitized.map(({ facultyId, ...rest }: any) => rest);
-          const { error: retryErr } = await supabase.from(tableName).upsert(fallback, { onConflict: 'id' });
-          if (retryErr) {
-            console.error(`Retry upsert failed for ${tableName}:`, retryErr);
-            alert(`Supabase Sync Error (${tableName}): ${retryErr.message}`);
-          } else {
-            console.log(`${tableName} synced (without facultyId).`);
-          }
-        } else if (tableName === 'users' && upsertError.message.includes('users_username_key')) {
-          // Username unique constraint violated — a user with the same username but different id
-          // already exists in Supabase (e.g. a previously migrated superadmin).
-          // Retry one-by-one: skip rows that still conflict, save the rest (new users).
-          console.warn('Username conflict detected — upserting users individually...');
-          let savedCount = 0;
-          for (const item of sanitized) {
-            const { error: rowErr } = await supabase.from(tableName).upsert([item], { onConflict: 'id' });
-            if (rowErr) {
-              if (rowErr.message.includes('users_username_key')) {
-                console.warn(`Skipped user "${item.username}" — username already exists in Supabase with a different id.`);
+      if (isTermScoped) {
+        // ── Term-scoped tables (courses, faculties, rooms, groups) ──────────────
+        // Strategy: DELETE all rows for this term first, then INSERT fresh data.
+        // This is far more reliable than upsert + NOT IN delete:
+        //   • NOT IN with 100s of IDs blows the PostgREST URL length limit and fails silently.
+        //   • Delete-then-insert is atomic from the app's perspective (isSyncingRef blocks
+        //     the realtime re-fetch during the window between the two operations).
+        const { error: preDeleteError } = await supabase
+          .from(tableName)
+          .delete()
+          .eq('termId', termId!);
+        if (preDeleteError) {
+          console.warn(`Pre-insert delete failed for ${tableName} (term ${termId}):`, preDeleteError);
+        }
+
+        if (sanitized.length > 0) {
+          let { error: upsertError } = await supabase
+            .from(tableName)
+            .upsert(sanitized, { onConflict: 'id' });
+
+          if (upsertError) {
+            if (upsertError.message.includes('facultyId') && tableName === 'faculties') {
+              console.warn('facultyId column missing, retrying without it...');
+              const fallback = sanitized.map(({ facultyId, ...rest }: any) => rest);
+              const { error: retryErr } = await supabase.from(tableName).upsert(fallback, { onConflict: 'id' });
+              if (retryErr) {
+                console.error(`Retry upsert failed for ${tableName}:`, retryErr);
+                alert(`Supabase Sync Error (${tableName}): ${retryErr.message}`);
               } else {
-                console.error(`Failed to upsert user "${item.username}":`, rowErr);
+                console.log(`${tableName} synced (without facultyId).`);
               }
             } else {
-              savedCount++;
+              console.error(`Upsert failed for ${tableName}:`, upsertError);
+              alert(`Supabase Sync Error (${tableName}): ${upsertError.message}`);
             }
+          } else {
+            console.log(`${tableName} synced to Supabase (${sanitized.length} rows).`);
           }
-          console.log(`Users synced individually: ${savedCount}/${sanitized.length} saved.`);
         } else {
-          console.error(`Upsert failed for ${tableName}:`, upsertError);
-          alert(`Supabase Sync Error (${tableName}): ${upsertError.message}`);
+          console.log(`${tableName}: all rows cleared for term ${termId}.`);
         }
       } else {
-        console.log(`${tableName} upserted to Supabase.`);
-      }
+        // ── Non-term-scoped tables (users, terms) ────────────────────────────────
+        // Strategy: upsert by id, then delete rows that are no longer in the list.
+        const { error: upsertError } = await supabase
+          .from(tableName)
+          .upsert(sanitized, { onConflict: 'id' });
 
-      // ✅ FIX: Synchronization for DELETE.
-      // IDs present in Supabase but missing from our list should be removed.
-      const syncedIds = sanitized.map((item: any) => item.id);
-      let deleteQuery = supabase.from(tableName).delete();
-      
-      // Scoping the delete to avoid wiping data from other terms.
-      if (termId && tableName !== 'users' && tableName !== 'terms') {
-        deleteQuery = deleteQuery.eq('termId', termId);
-      }
-      
-      // If we have items left, exclude those IDs from deletion.
-      if (syncedIds.length > 0) {
-        // Postgrest syntax for NOT IN (...) — values must NOT be double-quoted
-        const { error: deleteError } = await deleteQuery.not('id', 'in', `(${syncedIds.join(',')})`);
-        if (deleteError) console.warn(`Delete sync error for ${tableName}:`, deleteError);
-      } else if (data.length === 0) {
-        // If the array is explicitly empty, and we are scoped to a term, delete everything for that term.
-        const { error: deleteAllError } = await deleteQuery;
-        if (deleteAllError) console.warn(`Full delete sync error for ${tableName}:`, deleteAllError);
+        if (upsertError) {
+          if (tableName === 'users' && upsertError.message.includes('users_username_key')) {
+            // Username unique constraint violated — retry row-by-row, skipping conflicts.
+            console.warn('Username conflict detected — upserting users individually...');
+            let savedCount = 0;
+            for (const item of sanitized) {
+              const { error: rowErr } = await supabase.from(tableName).upsert([item], { onConflict: 'id' });
+              if (rowErr) {
+                if (rowErr.message.includes('users_username_key')) {
+                  console.warn(`Skipped user "${item.username}" — username already exists with a different id.`);
+                } else {
+                  console.error(`Failed to upsert user "${item.username}":`, rowErr);
+                }
+              } else {
+                savedCount++;
+              }
+            }
+            console.log(`Users synced individually: ${savedCount}/${sanitized.length} saved.`);
+          } else {
+            console.error(`Upsert failed for ${tableName}:`, upsertError);
+            alert(`Supabase Sync Error (${tableName}): ${upsertError.message}`);
+          }
+        } else {
+          console.log(`${tableName} upserted to Supabase.`);
+        }
+
+        // Delete rows that are no longer in our list.
+        const syncedIds = sanitized.map((item: any) => item.id);
+        if (syncedIds.length > 0) {
+          const { error: deleteError } = await supabase
+            .from(tableName)
+            .delete()
+            .not('id', 'in', `(${syncedIds.join(',')})`);
+          if (deleteError) console.warn(`Delete sync error for ${tableName}:`, deleteError);
+        } else if (data.length === 0) {
+          const { error: deleteAllError } = await supabase.from(tableName).delete();
+          if (deleteAllError) console.warn(`Full delete sync error for ${tableName}:`, deleteAllError);
+        }
       }
 
       console.log(`${tableName} synchronization complete.`);
