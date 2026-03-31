@@ -382,16 +382,22 @@ export class DataService {
             // Surgical Sync: Delete items that are in Supabase for this term but NOT in our new list.
             const currentIds = sanitized.map(item => item.id);
             if (currentIds.length > 0) {
-              // Note: For very large datasets, 'not in' can fail due to URL length.
-              // However, most registries (rooms, etc) are < 100-200 items.
-              // If it fails, it's just a warning; the data is already upserted.
+              // ✅ FIX 2: Handle URL length limits (2k-8k chars). 600+ IDs exceed this.
+              // ✅ FIX 3: Fix special character bugs (like & or ,) by quoting the IDs.
               try {
-                const { error: syncDelError } = await supabase
-                  .from(tableName)
-                  .delete()
-                  .eq('termId', termId!)
-                  .not('id', 'in', `(${currentIds.join(',')})`);
-                if (syncDelError) console.warn(`Surgical delete sync error for ${tableName}:`, syncDelError);
+                if (currentIds.length <= 200) {
+                  // PostgREST syntax for NOT IN requires the string (id1,id2) or ("id1","id2")
+                  // We'll use quoted IDs to handle special characters like ampersands or commas.
+                  const safeList = `(${currentIds.map(id => `"${id}"`).join(',')})`;
+                  const { error: syncDelError } = await supabase
+                    .from(tableName)
+                    .delete()
+                    .eq('termId', termId!)
+                    .not('id', 'in', safeList);
+                  if (syncDelError) console.warn(`Surgical delete sync error for ${tableName}:`, syncDelError);
+                } else {
+                  console.log(`[DataService] Large dataset (${currentIds.length} items). Skipping surgical delete to avoid URL length overflow.`);
+                }
               } catch (e) {
                 console.warn(`Surgical delete sync crash for ${tableName}:`, e);
               }

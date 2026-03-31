@@ -49,17 +49,37 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target?.result as string;
-      const rows = text.split('\n').filter(row => row.trim() !== '');
-      if (rows.length < 2) return;
-      const headers = rows[0].split(',').map(h => h.trim());
+      
+      // ✅ Robust CSV Parser using Regex to handle commas inside quotes
+      // and different line endings (\r\n, \n, \r)
+      const lines = text.split(/\r?\n/).filter(line => line.trim());
+      if (lines.length < 2) {
+        alert("Invalid CSV format. Header row missing.");
+        return;
+      }
 
-      const parsedRows = rows.slice(1).map(row => {
-        const values = row.split(',');
-        return headers.reduce((obj: any, header, index) => {
-          obj[header] = values[index]?.trim();
-          return obj;
-        }, {});
-      });
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+      
+      const parsedRows: any[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const row = lines[i];
+        // Regex to match CSV fields (handles quoted strings with escaped quotes)
+        const regex = /(?:^|,)(?:"([^"]*(?:""[^"]*)*)"|([^",]*))/g;
+        const values: string[] = [];
+        let match;
+        while ((match = regex.exec(row)) !== null) {
+          let val = match[1] !== undefined ? match[1].replace(/""/g, '"') : match[2];
+          values.push((val || "").trim());
+        }
+        
+        if (values.length >= headers.length) {
+          const obj: any = {};
+          headers.forEach((header, index) => {
+            obj[header] = values[index];
+          });
+          parsedRows.push(obj);
+        }
+      }
 
       // ✅ Every item gets stamped with activeTermId
       const termTag = { termId: activeTermId || '' };
