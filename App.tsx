@@ -416,17 +416,12 @@ const App: React.FC = () => {
 
   const handleUpdateCourses = async (updatedCourses: Course[]) => {
     await withSync(async () => {
-      // Find what was actually deleted (if it's a true replace) vs what was added
-      // Wait, DataImportPanel is now giving us the FULL desired list for the term, IF we change DataImportPanel.
-      // But actually updatedCourses is already the new list.
       const deletedIds = courses.filter(old => !updatedCourses.some(newIt => newIt.id === old.id)).map(c => c.id);
-      
       setCourses(updatedCourses);
       await DataService.saveEntity('courses', 'unitime_courses', updatedCourses, effectiveActiveTerm?.id);
       for (const id of deletedIds) await DataService.deleteRecord('courses', id);
-      
-      const confirmed = await DataService.fetchTable<Course>('courses', effectiveActiveTerm?.id);
-      if (confirmed !== null) setCourses(confirmed);
+      // No confirmation read-back — trust local state after successful write.
+      // Background refresh (30s) will eventually reconcile with Supabase.
     });
   };
 
@@ -436,9 +431,6 @@ const App: React.FC = () => {
       setFaculties(updatedFaculties);
       await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties, effectiveActiveTerm?.id);
       for (const id of deletedIds) await DataService.deleteRecord('faculties', id);
-      
-      const confirmed = await DataService.fetchTable<Faculty>('faculties', effectiveActiveTerm?.id);
-      if (confirmed !== null) setFaculties(confirmed);
     });
   };
 
@@ -448,9 +440,6 @@ const App: React.FC = () => {
       setRooms(updatedRooms);
       await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms, effectiveActiveTerm?.id);
       for (const id of deletedIds) await DataService.deleteRecord('rooms', id);
-      
-      const confirmed = await DataService.fetchTable<Room>('rooms', effectiveActiveTerm?.id);
-      if (confirmed !== null) setRooms(confirmed);
     });
   };
 
@@ -460,9 +449,6 @@ const App: React.FC = () => {
       setGroups(updatedGroups);
       await DataService.saveEntity('groups', 'unitime_groups', updatedGroups, effectiveActiveTerm?.id);
       for (const id of deletedIds) await DataService.deleteRecord('groups', id);
-      
-      const confirmed = await DataService.fetchTable<StudentGroup>('groups', effectiveActiveTerm?.id);
-      if (confirmed !== null) setGroups(confirmed);
     });
   };
 

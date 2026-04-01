@@ -23,7 +23,7 @@ export class DataService {
   // skip overwriting state within WRITE_GUARD_MS of a write to avoid
   // a read-before-commit race wiping freshly uploaded data.
   static lastWriteTimestamp = 0;
-  private static WRITE_GUARD_MS = 10_000; // 10 seconds
+  private static WRITE_GUARD_MS = 60_000; // 60 seconds — covers large bulk uploads
 
   /** Returns true if a write happened within the guard window */
   static isWithinWriteGuard(): boolean {
