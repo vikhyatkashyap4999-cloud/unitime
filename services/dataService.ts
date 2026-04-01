@@ -49,10 +49,13 @@ export class DataService {
   }
 
   private static async upsertBatch(tableName: string, rows: any[]): Promise<string | null> {
-    const BATCH = 500;
+    const BATCH = 300; // Lowered batch size safely
     for (let i = 0; i < rows.length; i += BATCH) {
-      const { error } = await supabase!.from(tableName).upsert(rows.slice(i, i + BATCH), { onConflict: 'id' });
-      if (error) return error.message;
+      const { error } = await supabase!.from(tableName).upsert(rows.slice(i, i + BATCH));
+      if (error) {
+        console.error(`[DB] Bulk Upsert Error in ${tableName}:`, error);
+        return error.message;
+      }
     }
     return null;
   }
