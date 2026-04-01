@@ -151,6 +151,24 @@ export class DataService {
       }
 
       console.log(`[DB] ${tableName}: loaded ${data.length} rows${termId ? ` (term ${termId})` : ''}`);
+
+      // ── Auto-migration ─────────────────────────────────────────────────────
+      // If 0 rows for the active termId but rows exist with a different termId
+      // (e.g. data was imported directly into Supabase with termId = term name),
+      // re-tag all rows to the active termId so they show up in the app.
+      if (data.length === 0 && termId && TERM_SCOPED.has(tableName)) {
+        const { data: all, error: allErr } = await this.fetchAllPages<any>((from, to) =>
+          supabase!.from(tableName).select('*').range(from, to)
+        );
+        if (!allErr && all && all.length > 0) {
+          console.log(`[DB] Auto-migrating ${all.length} ${tableName} rows → termId ${termId}`);
+          const sanitized = all.map((r: any) => this.sanitize(tableName, r, termId));
+          await this.upsertBatch(tableName, sanitized);
+          return sanitized as T[];
+        }
+      }
+      // ── End auto-migration ─────────────────────────────────────────────────
+
       return data;
     } catch (err) {
       console.error(`[DB] fetchTable(${tableName}) crash:`, err);
