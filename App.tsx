@@ -291,6 +291,10 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       await fn();
+    } catch (err: any) {
+      console.error('[Sync Error]', err);
+      alert(err.message || 'Unknown synchronization error occurred.');
+      await refreshAllData(); // Recover local state from Supabase
     } finally {
       setIsSyncing(false);
       isSyncingRef.current = false;
@@ -390,56 +394,68 @@ const App: React.FC = () => {
   };
 
   const handleUpdateUsers = async (updatedUsers: UserAccount[]) => {
+    const deletedIds = users.filter(old => !updatedUsers.some(newIt => newIt.id === old.id)).map(c => c.id);
     await withSync(async () => {
       setUsers(updatedUsers);
       await DataService.saveEntity('users', 'unitime_users', updatedUsers);
+      for (const id of deletedIds) await DataService.deleteRecord('users', id);
     });
   };
 
   const handleUpdateTerms = async (updatedTerms: Term[]) => {
+    const deletedIds = terms.filter(old => !updatedTerms.some(newIt => newIt.id === old.id)).map(c => c.id);
     await withSync(async () => {
       setTerms(updatedTerms);
       await DataService.saveEntity('terms', 'unitime_terms', updatedTerms);
+      for (const id of deletedIds) await DataService.deleteRecord('terms', id);
     });
   };
 
   const handleUpdateCourses = async (updatedCourses: Course[]) => {
+    const deletedIds = courses.filter(old => !updatedCourses.some(newIt => newIt.id === old.id)).map(c => c.id);
     await withSync(async () => {
       setCourses(updatedCourses);
       await DataService.saveEntity('courses', 'unitime_courses', updatedCourses, effectiveActiveTerm?.id);
-      // Confirm: re-read from Supabase immediately so the UI reflects what was
-      // actually committed, catching any silent batch failures.
+      for (const id of deletedIds) await DataService.deleteRecord('courses', id);
       const confirmed = await DataService.loadFromSupabaseOnly<Course>('courses', effectiveActiveTerm?.id);
       if (confirmed !== null) setCourses(confirmed);
     });
   };
 
   const handleUpdateFaculties = async (updatedFaculties: Faculty[]) => {
+    const deletedIds = faculties.filter(old => !updatedFaculties.some(newIt => newIt.id === old.id)).map(c => c.id);
     await withSync(async () => {
       setFaculties(updatedFaculties);
       await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties, effectiveActiveTerm?.id);
+      for (const id of deletedIds) await DataService.deleteRecord('faculties', id);
       const confirmed = await DataService.loadFromSupabaseOnly<Faculty>('faculties', effectiveActiveTerm?.id);
       if (confirmed !== null) setFaculties(confirmed);
     });
   };
 
   const handleUpdateRooms = async (updatedRooms: Room[]) => {
+    const deletedIds = rooms.filter(old => !updatedRooms.some(newIt => newIt.id === old.id)).map(c => c.id);
     await withSync(async () => {
       setRooms(updatedRooms);
       await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms, effectiveActiveTerm?.id);
+      for (const id of deletedIds) await DataService.deleteRecord('rooms', id);
       const confirmed = await DataService.loadFromSupabaseOnly<Room>('rooms', effectiveActiveTerm?.id);
       if (confirmed !== null) setRooms(confirmed);
     });
   };
 
   const handleUpdateGroups = async (updatedGroups: StudentGroup[]) => {
+    const deletedIds = groups.filter(old => !updatedGroups.some(newIt => newIt.id === old.id)).map(c => c.id);
     await withSync(async () => {
       setGroups(updatedGroups);
       await DataService.saveEntity('groups', 'unitime_groups', updatedGroups, effectiveActiveTerm?.id);
+      for (const id of deletedIds) await DataService.deleteRecord('groups', id);
       const confirmed = await DataService.loadFromSupabaseOnly<StudentGroup>('groups', effectiveActiveTerm?.id);
       if (confirmed !== null) setGroups(confirmed);
     });
   };
+
+
 
   const handleWipeAllData = async () => {
     if (!confirm('CRITICAL ACTION: This will delete ALL courses, faculty, rooms, cohorts and scheduled sessions from BOTH local storage and Supabase. Only user accounts and terms will be preserved. Proceed?')) {
@@ -582,25 +598,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleFullSync = async () => {
-    isSyncingRef.current = true;
-    setIsSyncing(true);
-    try {
-      // Sync in order to satisfy foreign keys
-      await DataService.saveEntity('terms', 'unitime_terms', terms);
-      await DataService.saveEntity('users', 'unitime_users', users);
-      await DataService.saveEntity('courses', 'unitime_courses', courses);
-      await DataService.saveEntity('faculties', 'unitime_faculties', faculties);
-      await DataService.saveEntity('rooms', 'unitime_rooms', rooms);
-      await DataService.saveEntity('groups', 'unitime_groups', groups);
-      await DataService.saveEntity('schedule', 'unitime_full_dataset', schedule as any[]);
-      alert('Full System Sync Successful! All local data is now mirror-synced to Supabase.');
-    } catch (err: any) {
-      alert('Full Sync Failed: ' + (err.message || 'Unknown error during sequential migration.'));
-    }
-    setIsSyncing(false);
-    setTimeout(() => { isSyncingRef.current = false; }, 4000);
-  };
+
 
   const handleExportPDF = async () => {
     setIsSyncing(true);
@@ -893,7 +891,7 @@ const App: React.FC = () => {
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} onDeleteEntry={handleDeleteSession} />}
           {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
           {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadGroups={handleUpdateGroups} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
-          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} onFullSync={handleFullSync} onWipeAllData={handleWipeAllData} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} onMigrateData={handleMigrateData} />}
+          {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} />}
         </div>
       </main>
 

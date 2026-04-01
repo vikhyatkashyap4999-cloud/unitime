@@ -22,8 +22,6 @@ interface AdminPanelProps {
   users: UserAccount[];
   onUpdateUsers: (users: UserAccount[]) => void;
   currentUser: UserAccount;
-  onFullSync: () => Promise<void>;
-  onWipeAllData: () => Promise<void>;
   schedule: ScheduleEntry[];
   courses: Course[];
   faculties: Faculty[];
@@ -32,24 +30,17 @@ interface AdminPanelProps {
   activeTermId?: string;
   activeTermName?: string;
   onClearSchedule: () => Promise<void>;
-  onMigrateData: () => Promise<void>;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUser, onFullSync, onWipeAllData, schedule, courses, faculties, rooms, groups, activeTermId, activeTermName, onClearSchedule, onMigrateData }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUser, schedule, courses, faculties, rooms, groups, activeTermId, activeTermName, onClearSchedule }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Read credentials from localStorage first, then fall back to build-time env vars.
-  // Env vars are baked into the Vercel bundle and work for all users automatically.
+  // Active Supabase URL check (if using env vars)
   const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-  const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
   const usingEnvVars = !!(envUrl && !envUrl.includes('xyz.supabase.co'));
-
-  const [apiEndpoint, setApiEndpoint] = useState(localStorage.getItem('VITE_SUPABASE_URL') || envUrl);
-  const [apiKey, setApiKey] = useState(localStorage.getItem('VITE_SUPABASE_ANON_KEY') || envKey);
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'saved'>('idle');
 
   const initialUserState: Partial<UserAccount> = {
     username: '',
@@ -82,24 +73,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUsers, currentUs
     }
   };
 
-  const saveBackendConfig = () => {
-    if (apiEndpoint && apiKey) {
-      localStorage.setItem('VITE_SUPABASE_URL', apiEndpoint);
-      localStorage.setItem('VITE_SUPABASE_ANON_KEY', apiKey);
-      setSyncStatus('saved');
-      setTimeout(() => window.location.reload(), 1500);
-    } else {
-      // Guard: don't silently wipe credentials — ask for confirmation first.
-      const hasExisting = localStorage.getItem('VITE_SUPABASE_URL') || usingEnvVars;
-      if (hasExisting) {
-        if (!confirm('Both fields are empty. This will REMOVE the saved Supabase connection. Are you sure?')) return;
-      }
-      localStorage.removeItem('VITE_SUPABASE_URL');
-      localStorage.removeItem('VITE_SUPABASE_ANON_KEY');
-      setSyncStatus('saved');
-      setTimeout(() => window.location.reload(), 1500);
-    }
-  };
+
 
   const closeModal = () => {
     setIsAdding(false);
@@ -246,9 +220,9 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
         </div>
       </div>
 
-      <div className="px-2 grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 overflow-y-auto mb-10 pb-20 custom-scrollbar">
-        {/* Left Column: Personnel & Migration */}
-        <div className="lg:col-span-8 flex flex-col gap-4">
+      <div className="px-2 grid grid-cols-1 gap-4 flex-1 overflow-y-auto mb-10 pb-20 custom-scrollbar">
+        {/* Main Column: Personnel & Migration */}
+        <div className="flex flex-col gap-4">
           
           {/* Personnel Directory Panel */}
           <div className="bg-[#f0f0f0] border-2 border-[#185baf] shadow-md flex flex-col">
@@ -438,106 +412,7 @@ CREATE POLICY "Allow all access" ON public.schedule FOR ALL USING (true) WITH CH
              </div>
           </div>
         </div>
-
-        {/* Right Column: Supabase Settings */}
-        <div className="lg:col-span-4 flex flex-col gap-4">
-          <div className="bg-[#f0f0f0] border-2 border-[#185baf] shadow-md flex flex-col">
-             <div className="bg-[#185baf] text-white px-3 py-1.5 flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <Server className="w-4 h-4" />
-                  <span className="text-[11px] font-bold tracking-wide uppercase">Supabase Config</span>
-                </div>
-             </div>
-             
-             <div className="p-4 space-y-4 bg-white">
-                <div className="flex items-center justify-between border-b border-[#eee] pb-2">
-                  <span className="text-[10px] font-bold text-[#333] uppercase tracking-widest">Active State</span>
-                  <span className={`text-[9px] font-bold uppercase px-2 shadow-[2px_2px_0_#ccc] border ${(localStorage.getItem('VITE_SUPABASE_URL') || usingEnvVars) ? 'bg-green-100 text-green-700 border-green-500' : 'bg-[#f0f0f0] text-[#666] border-[#999]'}`}>
-                    {usingEnvVars && !localStorage.getItem('VITE_SUPABASE_URL') ? 'LIVE (ENV VARS)' : localStorage.getItem('VITE_SUPABASE_URL') ? 'LIVE LINK' : 'SANDBOX / LOCAL'}
-                  </span>
-                </div>
-
-                {usingEnvVars && !localStorage.getItem('VITE_SUPABASE_URL') && (
-                  <div className="bg-blue-50 border border-blue-200 px-2 py-1.5 text-[9px] font-bold text-blue-700 uppercase tracking-wide">
-                    Connection configured via Vercel environment variables — all team members connect automatically. No manual entry needed.
-                  </div>
-                )}
-
-                <div className="space-y-1">
-                   <label className="text-[10px] font-bold text-[#666] uppercase tracking-wide">Project URL</label>
-                   <input 
-                     type="text" 
-                     value={apiEndpoint}
-                     onChange={(e) => setApiEndpoint(e.target.value)}
-                     placeholder="https://xyz.supabase.co"
-                     className="w-full border-2 border-[#ccc] px-2 py-1.5 text-[11px] font-bold outline-none focus:border-[#185baf] text-[#185baf] placeholder:text-[#999]"
-                   />
-                </div>
-
-                <div className="space-y-1">
-                   <label className="text-[10px] font-bold text-[#666] uppercase tracking-wide">Anon Public Key</label>
-                   <input 
-                     type="password" 
-                     value={apiKey}
-                     onChange={(e) => setApiKey(e.target.value)}
-                     placeholder="sb_publishable_..."
-                     className="w-full border-2 border-[#ccc] px-2 py-1.5 text-[11px] font-bold outline-none focus:border-[#185baf] text-[#185baf] placeholder:text-[#999]"
-                   />
-                </div>
-
-                <div className="pt-2 space-y-2">
-                  <button 
-                    onClick={saveBackendConfig}
-                    className="btn-primary w-full py-2 flex items-center justify-center gap-2 shadow-[2px_2px_0_#00479b]"
-                  >
-                     {syncStatus === 'saved' ? <CheckCircle2 className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-                     {syncStatus === 'saved' ? 'CREDENTIALS APPLIED' : 'BIND CONNECTION'}
-                  </button>
-
-                  <button
-                    onClick={onFullSync}
-                    className="w-full py-2 bg-[#f0f0f0] border-2 border-[#185baf] text-[#185baf] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-white transition-colors"
-                  >
-                     <CloudLightning className="w-4 h-4" /> REPAIR DATABASE CONNECTIONS
-                  </button>
-
-                  <button
-                    onClick={onMigrateData}
-                    className="w-full py-2 bg-[#fff8e1] border-2 border-[#f59e0b] text-[#b45309] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-[#f59e0b] hover:text-white transition-all"
-                    title="Use this if data exists in Supabase but nothing shows in the app"
-                  >
-                     <RefreshCcw className="w-4 h-4" /> FIX DATA LINKAGE (DATA NOT SHOWING)
-                  </button>
-
-                  <button 
-                    onClick={onWipeAllData}
-                    className="w-full py-2 bg-red-50 border-2 border-red-600 text-red-600 font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-red-600 hover:text-white transition-all shadow-[2px_2px_0_#991b1b]"
-                  >
-                     <Trash2 className="w-4 h-4" /> FACTORY RESET / PURGE DATA
-                  </button>
-                </div>
-             </div>
-          </div>
-
-          <div className="bg-[#f0f0f0] border border-[#ccc] shadow-sm flex flex-col mt-2">
-             <div className="bg-[#e0e0e0] border-b border-[#ccc] px-3 py-1 flex items-center justify-between">
-                <span className="text-[10px] font-bold text-[#333] uppercase flex items-center gap-1"><Shield className="w-3 h-3"/> Warning</span>
-             </div>
-             <div className="p-3 bg-white">
-               <p className="text-[10px] text-[#666] font-bold leading-relaxed mb-3">
-                  System currently uses plaintext user objects for local memory. This sandbox is exclusively designed for interface testing, NOT production routing.
-               </p>
-               <button 
-                 onClick={copySql}
-                 className="w-full p-1.5 bg-[#f0f0f0] border border-[#ccc] text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-1 hover:bg-[#e6e6e6] text-[#333]"
-               >
-                  <Database className="w-3 h-3" /> EXPORT SQL SCHEMA
-               </button>
-             </div>
-          </div>
-        </div>
       </div>
-
       {isAdding && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/20">
           <div className="bg-[#f0f0f0] border-2 border-[#185baf] shadow-2xl w-full max-w-lg">

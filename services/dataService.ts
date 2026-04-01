@@ -189,41 +189,32 @@ export class DataService {
       if (sanitized.length > 0) {
         const upsertErr = await this.upsertBatch(tableName, sanitized);
         if (upsertErr) {
-          // Username conflict — retry one-by-one skipping duplicates
           if (tableName === 'users' && upsertErr.includes('users_username_key')) {
-            for (const row of sanitized) {
-              const { error } = await supabase.from(tableName).upsert([row], { onConflict: 'id' });
-              if (error && !error.message.includes('users_username_key')) {
-                console.error(`[DB] User upsert failed for ${row.username}:`, error.message);
-              }
-            }
+            throw new Error('Username already exists in the database. Please use a unique username.');
           } else {
             console.error(`[DB] saveEntity upsert failed for ${tableName}:`, upsertErr);
-            alert(`Supabase sync error (${tableName}): ${upsertErr}`);
-            return;
+            throw new Error(`Supabase sync error (${tableName}): ${upsertErr}`);
           }
         }
         console.log(`[DB] ${tableName}: upserted ${sanitized.length} rows`);
       }
 
-      // Surgical delete: remove rows no longer in the list (only for manageable sizes)
-      const currentIds = sanitized.map((r: any) => r.id);
-      if (isTermScoped && currentIds.length > 0 && currentIds.length <= 200) {
-        const safeList = `(${currentIds.map(id => `"${id}"`).join(',')})`;
-        const { error } = await supabase.from(tableName).delete()
-          .eq('termId', termId!).not('id', 'in', safeList);
-        if (error) console.warn(`[DB] Surgical delete warning for ${tableName}:`, error.message);
-      } else if (!isTermScoped && data.length === 0) {
-        await supabase.from(tableName).delete().neq('id', '');
-      } else if (!isTermScoped && currentIds.length > 0 && currentIds.length <= 200) {
-        const safeList = `(${currentIds.map(id => `"${id}"`).join(',')})`;
-        const { error } = await supabase.from(tableName).delete().not('id', 'in', safeList);
-        if (error) console.warn(`[DB] Surgical delete (global) warning for ${tableName}:`, error.message);
-      }
-
+      // We intentionally DO NOT perform bulk deletes here to ensure multi-user safety.
+      // Use deleteRecord() for explicit removals.
       console.log(`[DB] ${tableName}: sync complete`);
     } catch (err) {
       console.error(`[DB] saveEntity(${tableName}) crash:`, err);
+    }
+  }
+
+  static async deleteRecord(tableName: string, id: string): Promise<void> {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from(tableName).delete().eq('id', id);
+      if (error) console.error(`[DB] deleteRecord error for ${tableName}:`, error.message);
+      else console.log(`[DB] ${tableName}: explicitly deleted record ${id}`);
+    } catch (err) {
+      console.error(`[DB] deleteRecord crash on ${tableName}:`, err);
     }
   }
 
