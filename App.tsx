@@ -931,7 +931,25 @@ const App: React.FC = () => {
         rooms={rooms} 
         groups={groups} 
       />
-      <RoomAvailabilityTool isOpen={isRoomToolOpen} onClose={() => setIsRoomToolOpen(false)} rooms={rooms} schedule={schedule} groups={groups} />
+      <RoomAvailabilityTool
+        isOpen={isRoomToolOpen}
+        onClose={() => setIsRoomToolOpen(false)}
+        rooms={rooms}
+        faculties={faculties}
+        schedule={schedule}
+        groups={groups}
+        onCellDoubleClick={(resourceType, resourceId, day, time) => {
+          // Open the session creation modal pre-filled with the resource + time
+          const initial: Partial<ScheduleEntry> = { day, startTime: time };
+          if (resourceType === 'Room') initial.roomId = resourceId;
+          if (resourceType === 'Faculty') initial.facultyId = resourceId;
+          if (resourceType === 'Group') initial.groupIds = [resourceId];
+          setModalInitialData(initial);
+          setIsModalOpen(true);
+          // Also open / focus a timetable panel for that resource
+          addPanel(resourceType, resourceId);
+        }}
+      />
     </div>
   );
 };
