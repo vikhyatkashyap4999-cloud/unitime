@@ -98,11 +98,11 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
       if (sessionGroups.length === 0) {
         rows.push({
           '_event_id': eventId,
-          '_day_of_week': s.day.substring(0, 3),
+          '_day_of_week': s.day,
           '_start_time': s.startTime,
           '_end_time': s.endTime,
-          '_weeks': 'Jan-25',
-          '_event_type': s.category || 'Explo',
+          '_weeks': s.weeks.join(','),
+          '_event_type': s.category || 'Theory',
           'Module Unique ID': (course as any)?._unique_name || course?.code || '',
           'Module': (course as any)?._name || course?.name || '',
           'Room': (room as any)?._unique_name || room?.name || '',
@@ -114,11 +114,11 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
         sessionGroups.forEach(g => {
           rows.push({
             '_event_id': eventId,
-            '_day_of_week': s.day.substring(0, 3),
+            '_day_of_week': s.day,
             '_start_time': s.startTime,
             '_end_time': s.endTime,
-            '_weeks': 'Jan-25',
-            '_event_type': s.category || 'Explo',
+            '_weeks': s.weeks.join(','),
+            '_event_type': s.category || 'Theory',
             'Module Unique ID': (course as any)?._unique_name || course?.code || '',
             'Module': (course as any)?._name || course?.name || '',
             'Room': (room as any)?._unique_name || room?.name || '',
@@ -214,7 +214,15 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
       title: 'Full Institutional Timetable',
       description: 'Complete list of all scheduled sessions across all colleges and departments.',
       icon: <Table className="w-5 h-5" />,
-      action: () => downloadCSV(getFullTimetableData(getFilteredSchedule()), 'Full_University_Timetable')
+      buttonLabel: 'Download Excel Report',
+      action: () => {
+        const data = getFullTimetableData(getFilteredSchedule());
+        if (data.length === 0) { alert('No schedule data available for this term.'); return; }
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Full Timetable');
+        XLSX.writeFile(wb, `Full_University_Timetable_${new Date().toISOString().split('T')[0]}.xlsx`);
+      }
     },
     {
       id: 'clashes',

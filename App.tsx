@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 import { DataService } from './services/dataService';
 import { supabase } from './services/supabase';
 
@@ -728,47 +729,51 @@ const App: React.FC = () => {
 
   const handleExportExcel = () => {
     try {
-      if (!schedule || schedule.length === 0) {
-        alert('No schedule data available to export.');
+      const termSchedule = effectiveActiveTerm
+        ? schedule.filter(s => s.termId === effectiveActiveTerm.id)
+        : schedule;
+
+      if (termSchedule.length === 0) {
+        alert('No schedule data available to export for the active term.');
         return;
       }
-      
-      const activeTerm = terms.find(t => t.isActive);
-      const headers = ['Term', 'Day', 'Start Time', 'End Time', 'Course Code', 'Course Name', 'Category', 'Room', 'Faculty', 'Student Groups', 'Weeks'];
-      
-      const rows = schedule.map(s => {
+
+      const rows: any[] = [];
+      termSchedule.forEach(s => {
         const course = courses.find(c => c.id === s.courseId);
-        const room = rooms.find(r => r.id === s.roomId);
         const faculty = faculties.find(f => f.id === s.facultyId);
-        const selectedGroups = groups.filter(g => s.groupIds?.includes(g.id)).map(g => g.name).join('; ');
-        
-        return [
-          activeTerm?.name || 'All',
-          s.day,
-          s.startTime,
-          s.endTime,
-          course?.code || '',
-          course?.name || '',
-          s.category || 'Theory',
-          room?.name || '',
-          faculty?.name || '',
-          selectedGroups,
-          s.weeks.join(', ')
-        ].map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',');
+        const room = rooms.find(r => r.id === s.roomId);
+        const sessionGroups = groups.filter(g => s.groupIds?.includes(g.id));
+
+        const baseRow = {
+          '_event_id': s.id,
+          '_day_of_week': s.day,
+          '_start_time': s.startTime,
+          '_end_time': s.endTime,
+          '_weeks': s.weeks.join(','),
+          '_event_type': s.category || 'Theory',
+          'Module Unique ID': (course as any)?._unique_name || course?.code || '',
+          'Module': (course as any)?._name || course?.name || '',
+          'Room': (room as any)?._unique_name || room?.name || '',
+          'Faculty_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
+          'Faculty_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
+        };
+
+        if (sessionGroups.length === 0) {
+          rows.push({ ...baseRow, Cohort: '' });
+        } else {
+          sessionGroups.forEach(g => {
+            rows.push({ ...baseRow, Cohort: (g as any)._unique_name || g.name });
+          });
+        }
       });
-      
-      const csvContent = [headers.join(','), ...rows].join('\n');
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `unitime-schedule-${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Timetable');
+      XLSX.writeFile(wb, `unitime-schedule-${new Date().toISOString().split('T')[0]}.xlsx`);
     } catch (error) {
-      console.error('CSV Export failed:', error);
+      console.error('Excel Export failed:', error);
       alert('Failed to generate export file.');
     }
   };
@@ -901,7 +906,7 @@ const App: React.FC = () => {
           )}
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} onDeleteEntry={handleDeleteSession} />}
           {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
-          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} cohorts={groups} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadCohorts={handleUpdateGroups} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
+          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} cohorts={groups} schedule={schedule} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadCohorts={handleUpdateGroups} onRestoreSchedule={handleSaveSession} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
           {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} />}
         </div>
       </main>

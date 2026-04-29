@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { BookOpen, User, Users, MapPin, Download, Upload, CheckCircle2, RefreshCcw, FileText, Database, Plus, Trash2, AlertTriangle } from 'lucide-react';
-import { Course, Faculty, Room, StudentGroup } from '../types';
+import * as XLSX from 'xlsx';
+import { BookOpen, User, Users, MapPin, Download, Upload, CheckCircle2, RefreshCcw, FileText, Database, Plus, Trash2, AlertTriangle, RotateCcw, Shield } from 'lucide-react';
+import { Course, Faculty, Room, StudentGroup, ScheduleEntry } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 
 type ProgressFn = (pct: number, synced: number, total: number) => void;
@@ -10,23 +11,26 @@ interface DataImportPanelProps {
   faculties: Faculty[];
   rooms: Room[];
   cohorts: StudentGroup[];
+  schedule: ScheduleEntry[];
   onUploadCourses: (data: Course[], onProgress: ProgressFn) => void;
   onUploadFaculties: (data: Faculty[], onProgress: ProgressFn) => void;
   onUploadRooms: (data: Room[], onProgress: ProgressFn) => void;
   onUploadCohorts: (data: StudentGroup[], onProgress: ProgressFn) => void;
+  onRestoreSchedule: (entries: Omit<ScheduleEntry, 'id' | 'departmentId'>[]) => Promise<void>;
   onWipeData: (tab: 'Modules' | 'Faculties' | 'Rooms' | 'Cohorts') => Promise<void>;
   activeTermId?: string;
   activeTermName?: string;
 }
 
 type ImportType = 'Modules' | 'Faculties' | 'Rooms' | 'Cohorts';
+type AllTabType = ImportType | 'Schedule';
 
 const DataImportPanel: React.FC<DataImportPanelProps> = ({
-  courses, faculties, rooms, cohorts,
+  courses, faculties, rooms, cohorts, schedule,
   onUploadCourses, onUploadFaculties, onUploadRooms, onUploadCohorts,
-  onWipeData, activeTermId, activeTermName
+  onRestoreSchedule, onWipeData, activeTermId, activeTermName
 }) => {
-  const [activeTab, setActiveTab] = useState<ImportType>('Modules');
+  const [activeTab, setActiveTab] = useState<AllTabType>('Modules');
   const [lastUpload, setLastUpload] = useState<{ type: string; count: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeImportType, setActiveImportType] = useState<ImportType | null>(null);
@@ -38,6 +42,13 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     synced: number;
     total: number;
   } | null>(null);
+
+  const scheduleFileRef = useRef<HTMLInputElement>(null);
+  const [restorePreview, setRestorePreview] = useState<{
+    events: Omit<ScheduleEntry, 'id' | 'departmentId'>[];
+    unmatched: { modules: string[]; faculties: string[]; rooms: string[]; cohorts: string[] };
+  } | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
 
   const templates = {
     Modules: "_module_id,_unique_name,_name,_academic_year,Semester\n1,CHCE2028_2,Chemical Technology,2025,SEM-3\n2,CS101,Intro to CS,2025,SEM-1",
@@ -260,17 +271,179 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     setNewItem({});
   };
 
-  const getIcon = (type: ImportType) => {
+  const handleDownloadBackup = () => {
+    const termSchedule = activeTermId
+      ? schedule.filter(s => s.termId === activeTermId)
+      : schedule;
+
+    if (termSchedule.length === 0) {
+      alert('No scheduled sessions found for the active term.');
+      return;
+    }
+
+    const rows: any[] = [];
+    termSchedule.forEach(s => {
+      const course = courses.find(c => c.id === s.courseId);
+      const faculty = faculties.find(f => f.id === s.facultyId);
+      const room = rooms.find(r => r.id === s.roomId);
+      const sessionGroups = cohorts.filter(g => s.groupIds?.includes(g.id));
+
+      const baseRow = {
+        '_event_id': s.id,
+        '_day_of_week': s.day,
+        '_start_time': s.startTime,
+        '_end_time': s.endTime,
+        '_weeks': s.weeks.join(','),
+        '_event_type': s.category || 'Theory',
+        'Module Unique ID': (course as any)?._unique_name || course?.code || '',
+        'Module': (course as any)?._name || course?.name || '',
+        'Room': (room as any)?._unique_name || room?.name || '',
+        'Faculty_ID': (faculty as any)?._Faculty_ID || faculty?.id || '',
+        'Faculty_Name': (faculty as any)?._Faculty_name || faculty?.name || '',
+      };
+
+      if (sessionGroups.length === 0) {
+        rows.push({ ...baseRow, Cohort: '' });
+      } else {
+        sessionGroups.forEach(g => {
+          rows.push({ ...baseRow, Cohort: (g as any)._unique_name || g.name });
+        });
+      }
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Timetable Backup');
+    const termLabel = activeTermName || activeTermId || 'term';
+    XLSX.writeFile(wb, `timetable-backup-${termLabel}-${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const handleScheduleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = new Uint8Array(event.target?.result as ArrayBuffer);
+        const wb = XLSX.read(data, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+        const eventMap = new Map<string, any[]>();
+        rows.forEach(row => {
+          const eid = String(row['_event_id'] || '');
+          if (!eventMap.has(eid)) eventMap.set(eid, []);
+          eventMap.get(eid)!.push(row);
+        });
+
+        const unmatchedModules: string[] = [];
+        const unmatchedFaculties: string[] = [];
+        const unmatchedRooms: string[] = [];
+        const unmatchedCohorts: string[] = [];
+
+        const events: Omit<ScheduleEntry, 'id' | 'departmentId'>[] = [];
+
+        eventMap.forEach((eventRows) => {
+          const firstRow = eventRows[0];
+          const moduleUniqueId = String(firstRow['Module Unique ID'] || '').trim();
+          const facultyId = String(firstRow['Faculty_ID'] || '').trim();
+          const roomUniqueName = String(firstRow['Room'] || '').trim();
+
+          const course = courses.find(c =>
+            (c as any)._unique_name === moduleUniqueId || c.code === moduleUniqueId
+          );
+          const faculty = faculties.find(f =>
+            (f as any)._Faculty_ID === facultyId || f.id === facultyId
+          );
+          const room = rooms.find(r =>
+            (r as any)._unique_name === roomUniqueName || r.name === roomUniqueName
+          );
+
+          if (!course && moduleUniqueId && !unmatchedModules.includes(moduleUniqueId))
+            unmatchedModules.push(moduleUniqueId);
+          if (!faculty && facultyId && !unmatchedFaculties.includes(facultyId))
+            unmatchedFaculties.push(facultyId);
+          if (!room && roomUniqueName && !unmatchedRooms.includes(roomUniqueName))
+            unmatchedRooms.push(roomUniqueName);
+
+          const groupIds: string[] = [];
+          eventRows.forEach(row => {
+            const cohortName = String(row['Cohort'] || '').trim();
+            if (cohortName) {
+              const group = cohorts.find(g =>
+                (g as any)._unique_name === cohortName || g.name === cohortName
+              );
+              if (group) {
+                if (!groupIds.includes(group.id)) groupIds.push(group.id);
+              } else if (!unmatchedCohorts.includes(cohortName)) {
+                unmatchedCohorts.push(cohortName);
+              }
+            }
+          });
+
+          const weeksStr = String(firstRow['_weeks'] || '').trim();
+          const weeks = weeksStr
+            ? weeksStr.split(',').map((w: string) => parseInt(w.trim())).filter((w: number) => !isNaN(w))
+            : [1];
+
+          events.push({
+            termId: activeTermId || '',
+            courseId: course?.id || '',
+            facultyId: faculty?.id || '',
+            roomId: room?.id || '',
+            groupIds,
+            day: firstRow['_day_of_week'] as any,
+            startTime: firstRow['_start_time'],
+            endTime: firstRow['_end_time'],
+            weeks: weeks.length > 0 ? weeks : [1],
+            category: firstRow['_event_type'] as any,
+          });
+        });
+
+        setRestorePreview({
+          events,
+          unmatched: {
+            modules: unmatchedModules,
+            faculties: unmatchedFaculties,
+            rooms: unmatchedRooms,
+            cohorts: unmatchedCohorts,
+          }
+        });
+      } catch {
+        alert('Failed to parse file. Please upload a valid timetable backup Excel (.xlsx) file.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    if (scheduleFileRef.current) scheduleFileRef.current.value = '';
+  };
+
+  const handleConfirmRestore = async () => {
+    if (!restorePreview) return;
+    setIsRestoring(true);
+    try {
+      await onRestoreSchedule(restorePreview.events);
+      setRestorePreview(null);
+      alert(`Successfully restored ${restorePreview.events.length} sessions.`);
+    } catch {
+      alert('Restore failed. Please try again.');
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
+  const getIcon = (type: AllTabType) => {
     switch (type) {
       case 'Modules': return <BookOpen className="w-4 h-4" />;
       case 'Faculties': return <User className="w-4 h-4" />;
       case 'Rooms': return <MapPin className="w-4 h-4" />;
       case 'Cohorts': return <Users className="w-4 h-4" />;
+      case 'Schedule': return <Shield className="w-4 h-4" />;
     }
   };
 
-  const allData: any[] = activeTab === 'Modules' ? courses : activeTab === 'Faculties' ? faculties : activeTab === 'Rooms' ? rooms : cohorts;
-  const currentData = getTermData(allData);
+  const allData: any[] = activeTab === 'Modules' ? courses : activeTab === 'Faculties' ? faculties : activeTab === 'Rooms' ? rooms : activeTab === 'Cohorts' ? cohorts : [];
+  const currentData = activeTab === 'Schedule' ? [] : getTermData(allData);
 
   const renderTableHeaders = () => {
     if (activeTab === 'Modules') return (
@@ -463,19 +636,25 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
               </motion.div>
             )}
           </AnimatePresence>
-          <button onClick={clearAllData} disabled={!activeTermId}
-            className="flex items-center gap-2 px-3 py-1.5 text-[#ac2925] hover:bg-[#ebd5d5] font-bold text-sm transition-colors border border-transparent hover:border-[#ac2925] disabled:opacity-40 disabled:cursor-not-allowed">
-            <RefreshCcw className="w-4 h-4" />
-            Wipe {activeTab}
-          </button>
+          {activeTab !== 'Schedule' && (
+            <button onClick={clearAllData} disabled={!activeTermId}
+              className="flex items-center gap-2 px-3 py-1.5 text-[#ac2925] hover:bg-[#ebd5d5] font-bold text-sm transition-colors border border-transparent hover:border-[#ac2925] disabled:opacity-40 disabled:cursor-not-allowed">
+              <RefreshCcw className="w-4 h-4" />
+              Wipe {activeTab}
+            </button>
+          )}
         </div>
       </div>
 
       <div className="flex bg-[#f0f0f0] border-b border-[#ccc] w-full shadow-sm">
-        {(['Modules', 'Faculties', 'Rooms', 'Cohorts'] as ImportType[]).map(t => (
-          <button key={t} onClick={() => setActiveTab(t)}
+        {(['Modules', 'Faculties', 'Rooms', 'Cohorts', 'Schedule'] as AllTabType[]).map(t => (
+          <button key={t} onClick={() => { setActiveTab(t); setRestorePreview(null); }}
             className={`flex items-center gap-2 px-6 py-2.5 text-sm font-bold transition-all border-r border-[#ccc] ${
-              activeTab === t ? 'bg-white text-[#185baf] border-t-2 border-t-[#185baf] shadow-inner' : 'text-[#666] hover:bg-[#e6e6e6] border-t-2 border-t-transparent'
+              activeTab === t
+                ? t === 'Schedule'
+                  ? 'bg-white text-[#185baf] border-t-2 border-t-[#185baf] shadow-inner'
+                  : 'bg-white text-[#185baf] border-t-2 border-t-[#185baf] shadow-inner'
+                : 'text-[#666] hover:bg-[#e6e6e6] border-t-2 border-t-transparent'
             }`}>
             <span className={activeTab === t ? 'text-[#185baf]' : 'text-[#666]'}>{getIcon(t)}</span>
             {t}
@@ -483,6 +662,135 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         ))}
       </div>
 
+      {activeTab === 'Schedule' && (
+        <div className="space-y-6 pb-12 mt-2">
+          {/* Backup Download */}
+          <div className="bg-white border border-[#ccc] shadow-sm">
+            <div className="bg-[#185baf] text-white px-4 py-2.5 flex items-center gap-2">
+              <Download className="w-4 h-4" />
+              <h3 className="font-bold text-[13px] uppercase tracking-wide">Daily Schedule Backup</h3>
+            </div>
+            <div className="p-5 flex flex-col md:flex-row md:items-center gap-4">
+              <div className="flex-1">
+                <p className="text-sm text-[#555] leading-relaxed">
+                  Download the complete schedule for the active term as a canonical Excel file.
+                  Save this file daily — if timetable data is lost, upload it below to restore everything.
+                </p>
+                <p className="text-[11px] text-[#888] mt-1 font-bold uppercase tracking-wide">
+                  {activeTermId
+                    ? `${(schedule.filter(s => s.termId === activeTermId).length)} sessions in active term`
+                    : 'No active term selected'}
+                </p>
+              </div>
+              <button
+                onClick={handleDownloadBackup}
+                disabled={!activeTermId}
+                className="btn-primary flex items-center gap-2 px-5 py-2.5 font-bold whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Download className="w-4 h-4" />
+                Download Backup (.xlsx)
+              </button>
+            </div>
+          </div>
+
+          {/* Restore from Backup */}
+          <div className="bg-white border border-[#ccc] shadow-sm">
+            <div className="bg-[#555] text-white px-4 py-2.5 flex items-center gap-2">
+              <RotateCcw className="w-4 h-4" />
+              <h3 className="font-bold text-[13px] uppercase tracking-wide">Restore from Backup</h3>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-[#555] leading-relaxed">
+                Upload a previously downloaded backup file to recreate the schedule.
+                Existing sessions will <strong>not</strong> be deleted — only new entries are added.
+                Resources (modules, rooms, faculty, cohorts) must already exist in this term's registry.
+              </p>
+
+              {!restorePreview ? (
+                <button
+                  onClick={() => scheduleFileRef.current?.click()}
+                  disabled={!activeTermId}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-[#f0f0f0] border-2 border-dashed border-[#bbb] text-[#555] font-bold text-sm hover:bg-[#e8e8e8] hover:border-[#185baf] hover:text-[#185baf] transition-all disabled:opacity-40 disabled:cursor-not-allowed w-full justify-center"
+                >
+                  <Upload className="w-4 h-4" />
+                  Select Backup Excel File (.xlsx) to Preview
+                </button>
+              ) : (
+                <div className="space-y-4">
+                  {/* Preview Summary */}
+                  <div className="bg-[#f8f9fa] border border-[#ccc] p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-green-600" />
+                      <span className="text-sm font-bold text-[#333]">
+                        {restorePreview.events.length} events parsed from backup file
+                      </span>
+                    </div>
+
+                    {(restorePreview.unmatched.modules.length > 0 ||
+                      restorePreview.unmatched.faculties.length > 0 ||
+                      restorePreview.unmatched.rooms.length > 0 ||
+                      restorePreview.unmatched.cohorts.length > 0) && (
+                      <div className="border border-[#f0ad4e] bg-[#fcf8e3] p-3 space-y-2">
+                        <div className="flex items-center gap-2 text-[#8a6d3b] font-bold text-[11px] uppercase">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          Unmatched resources — these sessions will have blank fields:
+                        </div>
+                        {restorePreview.unmatched.modules.length > 0 && (
+                          <div className="text-[11px] text-[#8a6d3b]">
+                            <span className="font-bold">Modules:</span> {restorePreview.unmatched.modules.join(', ')}
+                          </div>
+                        )}
+                        {restorePreview.unmatched.faculties.length > 0 && (
+                          <div className="text-[11px] text-[#8a6d3b]">
+                            <span className="font-bold">Faculty IDs:</span> {restorePreview.unmatched.faculties.join(', ')}
+                          </div>
+                        )}
+                        {restorePreview.unmatched.rooms.length > 0 && (
+                          <div className="text-[11px] text-[#8a6d3b]">
+                            <span className="font-bold">Rooms:</span> {restorePreview.unmatched.rooms.join(', ')}
+                          </div>
+                        )}
+                        {restorePreview.unmatched.cohorts.length > 0 && (
+                          <div className="text-[11px] text-[#8a6d3b]">
+                            <span className="font-bold">Cohorts:</span> {restorePreview.unmatched.cohorts.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleConfirmRestore}
+                      disabled={isRestoring || restorePreview.events.length === 0}
+                      className="btn-primary flex items-center gap-2 px-5 py-2.5 font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      {isRestoring ? 'Restoring...' : `Confirm — Add ${restorePreview.events.length} Sessions`}
+                    </button>
+                    <button
+                      onClick={() => setRestorePreview(null)}
+                      className="btn-secondary flex items-center gap-2 px-5 py-2.5 font-bold"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <input
+            type="file"
+            ref={scheduleFileRef}
+            onChange={handleScheduleFileSelect}
+            className="hidden"
+            accept=".xlsx"
+          />
+        </div>
+      )}
+
+      {activeTab !== 'Schedule' && (<>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pb-12 items-start mt-2">
         <div className="lg:col-span-8 space-y-4">
           <div className="bg-white border border-[#ccc] shadow-sm">
@@ -494,7 +802,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
                   <span className="ml-2 text-[#666] font-medium text-xs">({currentData.length})</span>
                 </h3>
               </div>
-              <button onClick={() => { setActiveImportType(activeTab); fileInputRef.current?.click(); }}
+              <button onClick={() => { setActiveImportType(activeTab as ImportType); fileInputRef.current?.click(); }}
                 disabled={!activeTermId}
                 className="btn-primary flex items-center gap-2 py-1.5 px-4 text-xs shadow-sm hover:shadow disabled:opacity-40 disabled:cursor-not-allowed">
                 <Upload className="w-3.5 h-3.5" />
@@ -557,7 +865,8 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
                 Download strict CSV templates to ensure precise data mapping for bulk uploads.
               </p>
               <button onClick={() => {
-                const csvContent = templates[activeTab];
+                const csvContent = activeTab !== 'Schedule' ? templates[activeTab as ImportType] : '';
+                if (!csvContent) return;
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
@@ -573,6 +882,7 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         </div>
       </div>
       <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept=".csv" />
+      </>)}
     </div>
   );
 };
