@@ -358,10 +358,9 @@ const App: React.FC = () => {
       const updatedSchedule = [...scheduleRef.current, ...entries];
       setScheduleAndRef(updatedSchedule);
       await DataService.addEntries(entries, updatedSchedule);
-      // Confirm from Supabase — ensures entries are really persisted and catches
-      // silent upsert failures (e.g. Supabase free-tier connection limits).
-      const confirmed = await DataService.loadAllEntriesFromSupabase(effectiveActiveTerm?.id);
-      if (confirmed !== null) setScheduleAndRef(confirmed);
+      // Note: no Supabase confirm-read here — that caused a read-before-write race that
+      // wiped the new entry immediately (Supabase replica returned stale data). Local
+      // state + localStorage are the source of truth; the 30s safety-net handles sync.
     });
   };
 
