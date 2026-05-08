@@ -54,41 +54,50 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
     }).filter(f => f.load > 0).sort((a, b) => b.load - a.load).slice(0, 5);
   }, [faculties, effectiveSchedule]);
 
-  const StatBox = ({ icon: Icon, title, value, sub }: any) => (
-    <div className="flex bg-[#f8f9fa] border border-[#ccc] min-w-[150px] flex-1">
-      <div className="w-12 flex items-center justify-center border-r border-[#ccc] bg-white">
-        <Icon className="w-5 h-5 text-[#555]" />
-      </div>
-      <div className="p-2 pl-3 flex flex-col justify-center">
-        <span className="text-[10px] font-bold text-[#333] tracking-wide">{title}</span>
-        <div className="flex items-baseline gap-1 mt-0.5">
-          <span className="text-[15px] font-bold text-[#333]">{value}</span>
-          <span className="text-[10px] text-[#777]">{sub}</span>
-        </div>
-      </div>
-    </div>
-  );
+  const statCards = [
+    { icon: BookOpen, title: 'COURSES', value: courses.length, sub: 'Modules', color: '#6366f1', grad: 'linear-gradient(135deg, #4338ca, #6366f1)', bg: '#eef2ff' },
+    { icon: MapPin, title: 'ROOMS', value: rooms.length, sub: 'Venues', color: '#0891b2', grad: 'linear-gradient(135deg, #0e7490, #06b6d4)', bg: '#ecfeff' },
+    { icon: Users, title: 'STUDENTS', value: groups.length, sub: 'Enrolled', color: '#059669', grad: 'linear-gradient(135deg, #047857, #10b981)', bg: '#ecfdf5' },
+    { icon: Clock, title: 'LOAD', value: `${Math.round(totalHours)}h`, sub: 'Weekly', color: '#d97706', grad: 'linear-gradient(135deg, #b45309, #f59e0b)', bg: '#fffbeb' },
+    { icon: AlertTriangle, title: 'CLASHES', value: clashes.length, sub: 'Conflicts', color: '#e11d48', grad: 'linear-gradient(135deg, #be123c, #e11d48)', bg: '#fff1f2' },
+  ];
 
   return (
     <div className="p-4 max-w-[1400px] mx-auto min-h-screen font-sans">
-      <header className="flex justify-between items-center mb-4 border-b pb-2 border-[#ccc]">
+      {/* Gradient Header */}
+      <header className="p-4 mb-4 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e3a5f 40%, #185baf 100%)' }}>
         <div>
-          <h2 className="text-[16px] font-bold text-[#333] tracking-wide uppercase">System Overview</h2>
-          <p className="text-[11px] font-bold text-[#666] uppercase tracking-wide mt-0.5">
-            Active Term: <span className="text-[#185baf]">{activeTerm?.name || 'All Terms'}</span>
+          <h2 className="text-[18px] font-black tracking-wide uppercase">System Overview</h2>
+          <p className="text-[11px] font-bold text-blue-200 uppercase tracking-wide mt-0.5">
+            Active Term: <span className="text-white">{activeTerm?.name || 'All Terms'}</span>
           </p>
         </div>
-        <button className="px-5 py-1.5 bg-[#185baf] text-white text-[11px] font-bold border border-[#0d3b76] uppercase tracking-wide">
-          SYSTEM ONLINE
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-300">System Operational</span>
+          </div>
+          <button className="px-5 py-1.5 bg-white/10 backdrop-blur-sm text-white text-[11px] font-bold border border-white/20 uppercase tracking-wide hover:bg-white/20 transition-colors">
+            SYSTEM ONLINE
+          </button>
+        </div>
       </header>
 
       <div className="flex flex-wrap gap-2 mb-4">
-        <StatBox icon={BookOpen} title="COURSES" value={courses.length} sub="Modules" />
-        <StatBox icon={MapPin} title="ROOMS" value={rooms.length} sub="Venues" />
-        <StatBox icon={Users} title="STUDENTS" value={groups.length} sub="Enrolled" />
-        <StatBox icon={Clock} title="LOAD" value={`${Math.round(totalHours)}h`} sub="Weekly" />
-        <StatBox icon={AlertTriangle} title="CLASHES" value={clashes.length} sub="Conflicts" />
+        {statCards.map((stat) => (
+          <div key={stat.title} className="flex min-w-[150px] flex-1 border overflow-hidden hover:shadow-md transition-shadow" style={{ borderColor: `${stat.color}30`, background: stat.bg }}>
+            <div className="w-12 flex items-center justify-center" style={{ background: stat.grad }}>
+              <stat.icon className="w-5 h-5 text-white" />
+            </div>
+            <div className="p-2 pl-3 flex flex-col justify-center">
+              <span className="text-[10px] font-bold tracking-wide" style={{ color: stat.color }}>{stat.title}</span>
+              <div className="flex items-baseline gap-1 mt-0.5">
+                <span className="text-[15px] font-bold text-[#333]">{stat.value}</span>
+                <span className="text-[10px] text-[#777]">{stat.sub}</span>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">

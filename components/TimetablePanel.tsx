@@ -7,10 +7,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { formatTime12h } from '../services/utils';
 
 const TYPE_THEMES = {
-  Room:    { headerGrad: 'linear-gradient(135deg, #0e7490 0%, #0891b2 100%)', borderColor: '#0891b2', entryColor: '#0891b2', entryBorder: '#0e7490', accent: '#0891b2' },
-  Faculty: { headerGrad: 'linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)', borderColor: '#2563eb', entryColor: '#2563eb', entryBorder: '#1d4ed8', accent: '#2563eb' },
-  Group:   { headerGrad: 'linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)', borderColor: '#14b8a6', entryColor: '#14b8a6', entryBorder: '#0f766e', accent: '#14b8a6' },
-  Course:  { headerGrad: 'linear-gradient(135deg, #047857 0%, #059669 100%)', borderColor: '#059669', entryColor: '#059669', entryBorder: '#047857', accent: '#059669' },
+  Room:    { headerGrad: 'linear-gradient(135deg, #0e7490 0%, #06b6d4 100%)', borderColor: '#06b6d4', entryColor: '#0891b2', entryBorder: '#0e7490', accent: '#06b6d4' },
+  Faculty: { headerGrad: 'linear-gradient(135deg, #4338ca 0%, #6366f1 100%)', borderColor: '#6366f1', entryColor: '#6366f1', entryBorder: '#4338ca', accent: '#6366f1' },
+  Group:   { headerGrad: 'linear-gradient(135deg, #d97706 0%, #f59e0b 100%)', borderColor: '#f59e0b', entryColor: '#d97706', entryBorder: '#b45309', accent: '#f59e0b' },
+  Course:  { headerGrad: 'linear-gradient(135deg, #047857 0%, #10b981 100%)', borderColor: '#10b981', entryColor: '#059669', entryBorder: '#047857', accent: '#10b981' },
 } as const;
 
 const getDayDate = (dayIndex: number, week: number) => {

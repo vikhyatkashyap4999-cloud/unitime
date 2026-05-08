@@ -220,6 +220,10 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
       description: 'Complete list of all scheduled sessions across all colleges and departments.',
       icon: <Table className="w-5 h-5" />,
       buttonLabel: 'Download Excel Report',
+      accentColor: '#6366f1',
+      accentGrad: 'linear-gradient(135deg, #4338ca, #6366f1)',
+      accentBg: '#eef2ff',
+      accentBorder: '#c7d2fe',
       action: () => {
         const data = getFullTimetableData(getFilteredSchedule());
         if (data.length === 0) { alert('No schedule data available for this term.'); return; }
@@ -235,13 +239,21 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
       description: 'Multi-sheet Excel report with separate tabs for Cohort, Faculty, and Room clashes.',
       icon: <AlertTriangle className="w-5 h-5" />,
       action: downloadClashExcel,
-      buttonLabel: 'Download Excel Report'
+      buttonLabel: 'Download Excel Report',
+      accentColor: '#e11d48',
+      accentGrad: 'linear-gradient(135deg, #be123c, #e11d48)',
+      accentBg: '#fff1f2',
+      accentBorder: '#fecdd3',
     },
     {
       id: 'resources',
       title: 'Resource Utilization',
       description: 'Summary of room capacity vs student enrollment for scheduled sessions.',
       icon: <Calendar className="w-5 h-5" />,
+      accentColor: '#0891b2',
+      accentGrad: 'linear-gradient(135deg, #0e7490, #06b6d4)',
+      accentBg: '#ecfeff',
+      accentBorder: '#a5f3fc',
       action: () => {
         const data = getFilteredSchedule().map(s => {
           const room = rooms.find(r => r.id === s.roomId);
@@ -264,6 +276,10 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
       title: 'Faculty Load Report',
       description: 'Audit of faculty teaching hours and subject allocation for the active term.',
       icon: <Briefcase className="w-5 h-5" />,
+      accentColor: '#d97706',
+      accentGrad: 'linear-gradient(135deg, #b45309, #f59e0b)',
+      accentBg: '#fffbeb',
+      accentBorder: '#fde68a',
       action: () => {
         const filteredSchedule = getFilteredSchedule();
         const data = faculties.map(f => {
@@ -347,13 +363,20 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
 
   return (
     <div className="space-y-4 p-2">
-      {/* Header */}
-      <div className="flex justify-between items-end border-b-2 border-[#185baf] pb-1 mx-2 mb-0">
-        <div>
-          <h2 className="text-[16px] font-black text-[#185baf] uppercase tracking-wide">Reports & Analytics</h2>
-          <p className="text-[10px] text-[#666] font-bold uppercase tracking-widest">
-            {activeTermId ? terms.find(t => t.id === activeTermId)?.name : 'All Terms'}
-          </p>
+      {/* Header with gradient */}
+      <div className="mx-2 p-4 text-white" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e3a5f 40%, #185baf 100%)' }}>
+        <div className="flex justify-between items-center">
+          <div>
+            <h2 className="text-[18px] font-black uppercase tracking-wide">Reports & Analytics</h2>
+            <p className="text-[10px] text-blue-200 font-bold uppercase tracking-widest mt-0.5">
+              {activeTermId ? terms.find(t => t.id === activeTermId)?.name : 'All Terms'}
+              {' · '}{activeSchedule.length} scheduled sessions · {clashes.length} conflicts detected
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-[9px] font-bold uppercase tracking-widest text-blue-200">Live Data</span>
+          </div>
         </div>
       </div>
 
@@ -425,45 +448,47 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
             {reportCards.map((report) => (
               <div
                 key={report.id}
-                className="bg-white border border-[#c8ddf8] shadow-sm flex flex-col justify-between"
+                className="bg-white border shadow-sm flex flex-col justify-between hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200"
+                style={{ borderColor: report.accentBorder }}
               >
-                <div className="p-4 bg-white flex-1">
-                  <div className="flex items-center gap-3 border-b border-[#eee] pb-3 mb-3">
-                    <div className="w-10 h-10 bg-[#f0f6ff] border-2 border-[#c8ddf8] flex items-center justify-center text-[#185baf] shrink-0">
+                <div className="p-4 flex-1" style={{ background: `linear-gradient(180deg, ${report.accentBg} 0%, white 100%)` }}>
+                  <div className="flex items-center gap-3 pb-3 mb-3" style={{ borderBottom: `2px solid ${report.accentBorder}` }}>
+                    <div className="w-10 h-10 flex items-center justify-center text-white shrink-0 shadow-md" style={{ background: report.accentGrad }}>
                       {report.icon}
                     </div>
                     <div>
-                      <h3 className="text-[12px] font-black text-[#185baf] uppercase tracking-wide">{report.title}</h3>
-                      <p className="text-[9px] text-[#666] font-bold uppercase tracking-widest mt-0.5">System Audit</p>
+                      <h3 className="text-[12px] font-black uppercase tracking-wide" style={{ color: report.accentColor }}>{report.title}</h3>
+                      <p className="text-[9px] text-[#888] font-bold uppercase tracking-widest mt-0.5">Institutional Report</p>
                     </div>
                   </div>
-                  <p className="text-[11px] text-[#333] font-medium leading-relaxed">{report.description}</p>
+                  <p className="text-[11px] text-[#555] font-medium leading-relaxed">{report.description}</p>
                 </div>
-                <div className="p-2 bg-[#e0e0e0] border-t border-[#ccc]">
+                <div className="p-2" style={{ background: report.accentBg, borderTop: `1px solid ${report.accentBorder}` }}>
                   <button
                     onClick={report.action}
-                    className="w-full py-1.5 btn-primary text-sm flex items-center justify-center gap-2 shadow-sm"
+                    className="w-full py-1.5 text-[11px] font-bold uppercase tracking-widest text-white flex items-center justify-center gap-2 shadow-sm hover:opacity-90 transition-opacity"
+                    style={{ background: report.accentGrad }}
                   >
                     <Download className="w-3.5 h-3.5" />
-                    {(report as any).buttonLabel || 'Download CSV Report'}
+                    {report.buttonLabel || 'Download CSV Report'}
                   </button>
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="mx-2 mt-2 bg-[#185baf] p-4 border border-[#00479b] shadow-md text-white flex gap-4 items-center">
-            <div className="w-12 h-12 bg-white/10 border border-white/20 flex items-center justify-center shrink-0">
+          <div className="mx-2 mt-2 p-4 shadow-md text-white flex gap-4 items-center" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #185baf 100%)' }}>
+            <div className="w-12 h-12 bg-white/10 border border-white/20 flex items-center justify-center shrink-0 backdrop-blur-sm">
               <FileText className="w-6 h-6 text-white" />
             </div>
             <div className="flex-1">
               <h4 className="text-[11px] font-black uppercase tracking-wider">Custom Reporting Service</h4>
-              <p className="text-[10px] text-[#e0e0e0] mt-1 font-bold leading-relaxed">
+              <p className="text-[10px] text-blue-200 mt-1 font-bold leading-relaxed">
                 Need a specific layout or data format? Our team can configure custom templates.
               </p>
             </div>
             <div>
-              <button className="bg-white text-[#185baf] border flex items-center gap-1 border-[#185baf] px-4 py-1.5 text-[11px] font-bold uppercase hover:bg-[#f0f0f0] transition-colors leading-none tracking-wider whitespace-nowrap">
+              <button className="bg-white text-[#185baf] border border-white/50 flex items-center gap-1 px-4 py-1.5 text-[11px] font-bold uppercase hover:bg-blue-50 transition-colors leading-none tracking-wider whitespace-nowrap shadow-md">
                 Request Custom Template
               </button>
             </div>
