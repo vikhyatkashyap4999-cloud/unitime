@@ -70,7 +70,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
   );
 
   return (
-    <div className="p-4 max-w-[1400px] mx-auto min-h-screen font-sans bg-[#f1f5f9]">
+    <div className="p-4 max-w-[1400px] mx-auto min-h-screen font-sans">
       <header className="flex justify-between items-center mb-4 border-b pb-2 border-[#ccc]">
         <div>
           <h2 className="text-[16px] font-bold text-[#333] tracking-wide uppercase">System Overview</h2>
@@ -115,19 +115,19 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
           </div>
 
           {/* Efficiency Bar */}
-          <div className="bg-[#122b4f] text-white p-3 border border-[#0d1f38] flex flex-col justify-center h-[90px]">
-            <div className="flex items-center justify-between mb-3 border-b border-[#1f4070] pb-2">
+          <div className="bg-white border border-[#c8ddf8] p-3 flex flex-col justify-center h-[90px]" style={{ background: 'linear-gradient(135deg, #f0f6ff 0%, #e8f2fe 100%)' }}>
+            <div className="flex items-center justify-between mb-3 border-b border-[#c8ddf8] pb-2">
               <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-[#5c9ce6]" />
-                <h4 className="text-[12px] font-bold tracking-wide uppercase">Resource Efficiency</h4>
+                <Zap className="w-4 h-4 text-[#185baf]" />
+                <h4 className="text-[12px] font-bold tracking-wide uppercase text-[#185baf]">Resource Efficiency</h4>
               </div>
             </div>
             <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider mb-2">
-              <span>Global Utilization</span>
-              <span className="text-[#5c9ce6]">0%</span>
+              <span className="text-[#5a7ba8]">Global Utilization</span>
+              <span className="text-[#185baf]">0%</span>
             </div>
-            <div className="w-full h-2 bg-[#0d1f38]">
-              <div className="h-full bg-[#185baf]" style={{ width: '0%' }}></div>
+            <div className="w-full h-2 bg-[#c8ddf8] rounded-full overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: '0%', background: 'linear-gradient(90deg, #185baf, #0891b2)' }}></div>
             </div>
           </div>
         </div>

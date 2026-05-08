@@ -992,13 +992,11 @@ const App: React.FC = () => {
         onExportExcel={handleExportExcel}
       />
 
-      <main className="flex-1 relative overflow-hidden bg-slate-50">
+      <main className="flex-1 relative overflow-hidden bg-[#f0f6ff]">
         <div className="h-full w-full overflow-auto custom-scrollbar">
           {activeTab === 'dashboard' && <Dashboard courses={courses} rooms={rooms} groups={groups} schedule={schedule} clashes={clashes} activeTerm={effectiveActiveTerm} faculties={faculties} />}
           {activeTab === 'builder' && (
             <div className="flex flex-col h-full">
-              {/* GPU-composited glow — only transforms, never repaints */}
-              <div ref={glowRef} className="fixed pointer-events-none" style={{ width: 900, height: 900, top: 0, left: 0, zIndex: 1, background: 'radial-gradient(circle at center, rgba(99,162,255,0.14) 0%, transparent 70%)', willChange: 'transform' }} />
               <div className="flex-1 relative overflow-auto custom-scrollbar">
                 <div className="min-w-[2500px] min-h-[1500px] relative canvas-workspace">
                   <AnimatePresence>

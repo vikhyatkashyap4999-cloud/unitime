@@ -684,15 +684,13 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         </div>
       </div>
 
-      <div className="flex bg-[#f0f0f0] border-b border-[#ccc] w-full shadow-sm">
+      <div className="flex bg-[#f0f6ff] border-b-2 border-[#c8ddf8] w-full shadow-sm">
         {(['Modules', 'Faculties', 'Rooms', 'Cohorts', 'Schedule'] as AllTabType[]).map(t => (
           <button key={t} onClick={() => { setActiveTab(t); setRestorePreview(null); }}
-            className={`flex items-center gap-2 px-6 py-2.5 text-sm font-bold transition-all border-r border-[#ccc] ${
+            className={`flex items-center gap-2 px-6 py-2.5 text-sm font-bold transition-all border-r border-[#c8ddf8] ${
               activeTab === t
-                ? t === 'Schedule'
-                  ? 'bg-white text-[#185baf] border-t-2 border-t-[#185baf] shadow-inner'
-                  : 'bg-white text-[#185baf] border-t-2 border-t-[#185baf] shadow-inner'
-                : 'text-[#666] hover:bg-[#e6e6e6] border-t-2 border-t-transparent'
+                ? 'bg-white text-[#185baf] border-t-2 border-t-[#185baf]'
+                : 'text-[#5a7ba8] hover:bg-[#e4effc] border-t-2 border-t-transparent'
             }`}>
             <span className={activeTab === t ? 'text-[#185baf]' : 'text-[#666]'}>{getIcon(t)}</span>
             {t}
@@ -703,8 +701,8 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
       {activeTab === 'Schedule' && (
         <div className="space-y-6 pb-12 mt-2">
           {/* Backup Download */}
-          <div className="bg-white border border-[#ccc] shadow-sm">
-            <div className="bg-[#185baf] text-white px-4 py-2.5 flex items-center gap-2">
+          <div className="bg-white border border-[#c8ddf8] shadow-sm">
+            <div className="text-white px-4 py-2.5 flex items-center gap-2" style={{ background: 'linear-gradient(135deg, #0f3d8c, #185baf)' }}>
               <Download className="w-4 h-4" />
               <h3 className="font-bold text-[13px] uppercase tracking-wide">Daily Schedule Backup</h3>
             </div>
@@ -732,8 +730,8 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
           </div>
 
           {/* Restore from Backup */}
-          <div className="bg-white border border-[#ccc] shadow-sm">
-            <div className="bg-[#555] text-white px-4 py-2.5 flex items-center gap-2">
+          <div className="bg-white border border-[#c8ddf8] shadow-sm">
+            <div className="text-white px-4 py-2.5 flex items-center gap-2" style={{ background: 'linear-gradient(135deg, #2d5f8a, #3b82b8)' }}>
               <RotateCcw className="w-4 h-4" />
               <h3 className="font-bold text-[13px] uppercase tracking-wide">Restore from Backup</h3>
             </div>
@@ -831,8 +829,8 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
       {activeTab !== 'Schedule' && (<>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pb-12 items-start mt-2">
         <div className="lg:col-span-8 space-y-4">
-          <div className="bg-white border border-[#ccc] shadow-sm">
-            <div className="p-3 border-b border-[#ccc] bg-[#f0f0f0] flex justify-between items-center">
+          <div className="bg-white border border-[#c8ddf8] shadow-sm">
+            <div className="p-3 border-b border-[#c8ddf8] bg-[#f0f6ff] flex justify-between items-center">
               <div className="flex items-center gap-2">
                 <Database className="w-4 h-4 text-[#185baf]" />
                 <h3 className="text-sm font-bold text-[#333] uppercase tracking-wide">
@@ -878,8 +876,8 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
         </div>
 
         <div className="lg:col-span-4 space-y-6">
-          <div className="bg-[#f0f0f0] border border-[#ccc] shadow-sm">
-            <div className="bg-[#185baf] text-white px-3 py-2 flex items-center gap-2">
+          <div className="bg-white border border-[#c8ddf8] shadow-sm">
+            <div className="text-white px-3 py-2 flex items-center gap-2" style={{ background: 'linear-gradient(135deg, #0f3d8c, #185baf)' }}>
               <Plus className="w-4 h-4" />
               <h3 className="font-bold text-[13px] tracking-wide uppercase">Manual Entry</h3>
             </div>
@@ -893,8 +891,8 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
             </div>
           </div>
 
-          <div className="bg-[#f0f0f0] border border-[#ccc] shadow-sm mt-4">
-            <div className="bg-[#555] text-white px-3 py-2 flex items-center gap-2">
+          <div className="bg-white border border-[#c8ddf8] shadow-sm mt-4">
+            <div className="text-white px-3 py-2 flex items-center gap-2" style={{ background: 'linear-gradient(135deg, #2d5f8a, #3b82b8)' }}>
               <Download className="w-4 h-4" />
               <h4 className="font-bold text-[13px] uppercase tracking-wide">Import Templates</h4>
             </div>

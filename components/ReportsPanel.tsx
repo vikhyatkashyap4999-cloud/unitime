@@ -358,13 +358,13 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
       </div>
 
       {/* Tab switcher */}
-      <div className="flex mx-2 border-b border-[#ccc]">
+      <div className="flex mx-2 bg-[#f0f6ff] border-b-2 border-[#c8ddf8]">
         <button
           onClick={() => setActiveReportTab('reports')}
           className={`flex items-center gap-2 px-5 py-2 text-[12px] font-bold border-b-2 transition-all ${
             activeReportTab === 'reports'
               ? 'border-[#185baf] text-[#185baf] bg-white'
-              : 'border-transparent text-[#666] hover:text-[#185baf] hover:bg-[#f5f5f5]'
+              : 'border-transparent text-[#5a7ba8] hover:text-[#185baf] hover:bg-[#e4effc]'
           }`}
         >
           <FileText className="w-3.5 h-3.5" /> Reports
@@ -374,7 +374,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
           className={`flex items-center gap-2 px-5 py-2 text-[12px] font-bold border-b-2 transition-all ${
             activeReportTab === 'entries'
               ? 'border-[#185baf] text-[#185baf] bg-white'
-              : 'border-transparent text-[#666] hover:text-[#185baf] hover:bg-[#f5f5f5]'
+              : 'border-transparent text-[#5a7ba8] hover:text-[#185baf] hover:bg-[#e4effc]'
           }`}
         >
           <List className="w-3.5 h-3.5" />
@@ -388,7 +388,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
           className={`flex items-center gap-2 px-5 py-2 text-[12px] font-bold border-b-2 transition-all ${
             activeReportTab === 'clashes'
               ? 'border-[#ac2925] text-[#ac2925] bg-white'
-              : 'border-transparent text-[#666] hover:text-[#ac2925] hover:bg-[#f5f5f5]'
+              : 'border-transparent text-[#5a7ba8] hover:text-[#ac2925] hover:bg-[#fef0ef]'
           }`}
         >
           <ShieldAlert className="w-3.5 h-3.5" />
@@ -425,11 +425,11 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
             {reportCards.map((report) => (
               <div
                 key={report.id}
-                className="bg-[#f0f0f0] border-2 border-[#185baf] shadow-md flex flex-col justify-between"
+                className="bg-white border border-[#c8ddf8] shadow-sm flex flex-col justify-between"
               >
                 <div className="p-4 bg-white flex-1">
                   <div className="flex items-center gap-3 border-b border-[#eee] pb-3 mb-3">
-                    <div className="w-10 h-10 bg-[#f0f0f0] border-2 border-[#185baf] flex items-center justify-center text-[#185baf] shrink-0">
+                    <div className="w-10 h-10 bg-[#f0f6ff] border-2 border-[#c8ddf8] flex items-center justify-center text-[#185baf] shrink-0">
                       {report.icon}
                     </div>
                     <div>
@@ -690,7 +690,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
               <div className="overflow-x-auto">
                 <div className="max-h-[calc(100vh-280px)] overflow-y-auto">
                   <table className="w-full text-left border-collapse text-xs">
-                    <thead className="bg-[#f0f0f0] sticky top-0 z-10 border-b-2 border-[#185baf]">
+                    <thead className="bg-[#f0f6ff] sticky top-0 z-10 border-b-2 border-[#185baf]">
                       <tr>
                         {isAdmin && onDeleteMultiple && (
                           <th className="px-3 py-2 w-8">
