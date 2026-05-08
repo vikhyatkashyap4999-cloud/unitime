@@ -82,10 +82,19 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 font-sans relative overflow-hidden" style={{
-      background: 'linear-gradient(180deg, #0a1e42 0%, #0f3d8c 35%, #185baf 60%, #2a7cc7 80%, #4d9de0 100%)'
+      background: 'linear-gradient(160deg, #020c1f 0%, #04122e 35%, #071840 65%, #0a1f4a 100%)'
     }}>
+
+      {/* Aurora blobs */}
+      <div aria-hidden className="absolute inset-0 overflow-hidden pointer-events-none" style={{ zIndex: 0 }}>
+        <div className="aurora-blob aurora-1" />
+        <div className="aurora-blob aurora-2" />
+        <div className="aurora-blob aurora-3" />
+        <div className="aurora-blob aurora-4" />
+      </div>
+
       {/* Animated Stars */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ zIndex: 1 }}>
         {starsRef.current.map((star, i) => (
           <div
             key={i}
@@ -102,45 +111,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
         ))}
       </div>
 
-      {/* Constellation / Glow accent (centered above card) */}
-      <div className="absolute pointer-events-none" style={{
-        top: '12%',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: '280px',
-        height: '280px',
-        background: 'radial-gradient(circle, rgba(8,145,178,0.25) 0%, rgba(24,91,175,0.12) 40%, transparent 70%)',
-        filter: 'blur(30px)',
-      }} />
-
-      {/* Subtle radial glow behind card */}
-      <div className="absolute pointer-events-none" style={{
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        width: '600px',
-        height: '600px',
-        background: 'radial-gradient(circle, rgba(24,91,175,0.15) 0%, transparent 60%)',
-      }} />
-
-      {/* Floating Constellation Dots */}
-      <div className="absolute pointer-events-none" style={{ top: '10%', left: '50%', transform: 'translateX(-50%)' }}>
-        <svg width="200" height="200" viewBox="0 0 200 200" fill="none" className="opacity-30">
-          <circle cx="100" cy="60" r="2.5" fill="white" className="animate-pulse" />
-          <circle cx="130" cy="90" r="2" fill="white" style={{ animationDelay: '0.5s' }} className="animate-pulse" />
-          <circle cx="80" cy="100" r="1.8" fill="white" style={{ animationDelay: '1s' }} className="animate-pulse" />
-          <circle cx="110" cy="130" r="2.2" fill="white" style={{ animationDelay: '1.5s' }} className="animate-pulse" />
-          <circle cx="70" cy="70" r="1.5" fill="white" style={{ animationDelay: '2s' }} className="animate-pulse" />
-          <circle cx="140" cy="120" r="1.8" fill="white" style={{ animationDelay: '0.8s' }} className="animate-pulse" />
-          <line x1="100" y1="60" x2="130" y2="90" stroke="white" strokeWidth="0.5" opacity="0.3" />
-          <line x1="130" y1="90" x2="110" y2="130" stroke="white" strokeWidth="0.5" opacity="0.3" />
-          <line x1="80" y1="100" x2="110" y2="130" stroke="white" strokeWidth="0.5" opacity="0.3" />
-          <line x1="70" y1="70" x2="100" y2="60" stroke="white" strokeWidth="0.5" opacity="0.3" />
-          <line x1="80" y1="100" x2="70" y2="70" stroke="white" strokeWidth="0.5" opacity="0.3" />
-          <line x1="140" y1="120" x2="130" y2="90" stroke="white" strokeWidth="0.5" opacity="0.3" />
-        </svg>
-      </div>
-
       {/* Star Twinkle Animation */}
       <style>{`
         @keyframes starTwinkle {
@@ -150,7 +120,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, isInitializing }) => {
       `}</style>
 
       {/* Login Card */}
-      <div className="w-full max-w-[400px] overflow-hidden relative z-10" style={{
+      <div className="w-full max-w-[400px] overflow-hidden relative" style={{ zIndex: 10,
         background: 'rgba(255,255,255,0.95)',
         backdropFilter: 'blur(20px)',
         boxShadow: '0 25px 80px rgba(0,0,0,0.35), 0 4px 20px rgba(24,91,175,0.2), 0 0 60px rgba(8,145,178,0.1)',
