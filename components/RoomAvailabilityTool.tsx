@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Room, ScheduleEntry, DayOfWeek, StudentGroup, Faculty, ViewType } from '../types';
 import { DAYS, TIME_SLOTS, TOTAL_WEEKS } from '../constants';
-import { Search, MapPin, Clock, RefreshCw, Calendar, Users, User, ChevronDown } from 'lucide-react';
+import { Search, MapPin, Clock, Calendar, Users, User, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { formatTime12h } from '../services/utils';
 
@@ -26,7 +26,6 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
   const [startTimeFilter, setStartTimeFilter] = useState('08:00');
   const [endTimeFilter, setEndTimeFilter] = useState('21:00');
   const [searchQuery, setSearchQuery] = useState('');
-  const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const dragControls = useDragControls();
 
   const filteredTimeSlots = useMemo(() => {
@@ -45,7 +44,6 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
         .filter(f => !q || f.name.toLowerCase().includes(q) || (f.facultyId || '').toLowerCase().includes(q))
         .map(f => ({ id: f.id, name: f.name, sub: f.department }));
     }
-    // Cohort
     return groups
       .filter(g => !q || g.name.toLowerCase().includes(q) || g.program.toLowerCase().includes(q))
       .map(g => ({ id: g.id, name: g.name, sub: `${g.program} · Sem ${g.semester}` }));
@@ -70,152 +68,247 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
     Cohort: 'Group',
   };
 
-  const typeConfig: Record<ResourceType, { label: string; icon: React.ReactNode; color: string }> = {
-    Room:    { label: 'Room',    icon: <MapPin className="w-3.5 h-3.5" />,  color: '#185baf' },
-    Faculty: { label: 'Faculty', icon: <User className="w-3.5 h-3.5" />,   color: '#5b6bbf' },
-    Cohort:  { label: 'Cohort',  icon: <Users className="w-3.5 h-3.5" />,  color: '#185b7a' },
+  const typeConfig: Record<ResourceType, { label: string; icon: React.ReactNode; accent: string }> = {
+    Room:    { label: 'Room',    icon: <MapPin className="w-3.5 h-3.5" />,  accent: '#185baf' },
+    Faculty: { label: 'Faculty', icon: <User className="w-3.5 h-3.5" />,   accent: '#7c3aed' },
+    Cohort:  { label: 'Cohort',  icon: <Users className="w-3.5 h-3.5" />,  accent: '#0891b2' },
   };
+
+  // Count busy slots per time column for the heat bar
+  const columnBusy = useMemo(() => {
+    const map: Record<string, number> = {};
+    filteredTimeSlots.forEach(t => {
+      map[t] = resources.filter(r => getSlotUsage(r.id, t).status !== 'free').length;
+    });
+    return map;
+  }, [filteredTimeSlots, resources, schedule, day, week, resourceType]);
 
   if (!isOpen) return null;
 
   const current = typeConfig[resourceType];
+  const accentColor = current.accent;
+
+  const selectCls = "bg-[#f8fafc] text-[#1e293b] border border-[#e2e8f0] px-2.5 py-1.5 text-[11px] font-bold outline-none focus:border-[#185baf] cursor-pointer transition-colors";
 
   return (
     <AnimatePresence>
       <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-        <div className="absolute inset-0 bg-black/40 pointer-events-auto" onClick={onClose} />
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm pointer-events-auto" onClick={onClose} />
 
         <motion.div
           drag
           dragMomentum={false}
           dragListener={false}
           dragControls={dragControls}
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          className="bg-[#f0f0f0] shadow-2xl w-full max-w-[1200px] border-2 border-[#185baf] relative pointer-events-auto flex flex-col"
-          style={{ height: '80vh' }}
+          initial={{ scale: 0.96, opacity: 0, y: 12 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          exit={{ scale: 0.96, opacity: 0, y: 12 }}
+          transition={{ duration: 0.2 }}
+          className="relative pointer-events-auto flex flex-col w-full max-w-[1300px] overflow-hidden"
+          style={{
+            height: '84vh',
+            boxShadow: '0 32px 80px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.08)',
+            borderRadius: 2,
+          }}
         >
-          {/* Title Bar */}
+          {/* ── Title Bar ───────────────────────────────────── */}
           <div
-            className="bg-[#185baf] text-white px-3 py-1.5 flex justify-between items-center cursor-move"
+            className="flex justify-between items-center px-4 py-2.5 cursor-move select-none shrink-0"
+            style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1a2f5e 50%, #185baf 100)' ,
+                     background: 'linear-gradient(90deg,#0f172a 0%,#1e3a5f 45%,#185baf 100%)'}}
             onPointerDown={(e) => dragControls.start(e)}
-            style={{ touchAction: 'none' }}
           >
-            <div className="flex items-center gap-2">
-              {current.icon}
-              <h2 className="text-[12px] font-bold tracking-wide uppercase">{current.label} Usage Chart</h2>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="flex gap-4 items-center mr-4 pr-4 border-r border-white/20 text-[9px] font-bold uppercase tracking-widest text-white/80">
-                <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-[#d9534f] border border-white/40" /> Busy</div>
-                <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-[#5cb85c] border border-white/40" /> Free</div>
-                <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-[#7f1d1d] border border-white/40" /> Conflict</div>
-                <div className="flex items-center gap-1.5 border-l border-white/20 pl-4 text-white/60">Double-click cell → create event</div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-7 h-7 rounded" style={{ background: `${accentColor}30`, border: `1px solid ${accentColor}60` }}>
+                <span style={{ color: accentColor }}>{current.icon}</span>
               </div>
-              <button onClick={onClose} className="bg-[#d9534f] text-white px-2 py-0.5 hover:bg-[#c9302c] border border-white/20 font-bold text-xs">✕</button>
+              <div>
+                <h2 className="text-[13px] font-black text-white tracking-wide uppercase">{current.label} Availability</h2>
+                <p className="text-[9px] font-bold text-white/40 uppercase tracking-widest leading-none mt-0.5">Usage Chart · {day} · Week {week}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-5">
+              {/* Legend */}
+              <div className="flex gap-3 items-center border-r border-white/10 pr-5">
+                {[
+                  { color: '#22c55e', bg: '#14532d', label: 'Free', icon: <CheckCircle2 className="w-3 h-3" /> },
+                  { color: '#f87171', bg: '#7f1d1d', label: 'Busy', icon: <XCircle className="w-3 h-3" /> },
+                  { color: '#fbbf24', bg: '#78350f', label: 'Conflict', icon: <AlertTriangle className="w-3 h-3" /> },
+                ].map(l => (
+                  <div key={l.label} className="flex items-center gap-1.5 px-2 py-1 rounded" style={{ background: `${l.bg}60` }}>
+                    <span style={{ color: l.color }}>{l.icon}</span>
+                    <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: l.color }}>{l.label}</span>
+                  </div>
+                ))}
+              </div>
+              <span className="text-[9px] text-white/30 font-bold uppercase tracking-widest hidden lg:block">Double-click → create event</span>
+              <button
+                onClick={onClose}
+                className="w-7 h-7 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 rounded transition-colors font-bold text-sm"
+              >✕</button>
             </div>
           </div>
 
-          {/* Controls Bar */}
-          <div className="p-3 bg-[#f0f0f0] border-b border-[#ccc] flex items-center gap-4 flex-wrap">
+          {/* ── Controls Bar ────────────────────────────────── */}
+          <div className="shrink-0 px-4 py-2.5 flex items-center gap-4 flex-wrap border-b" style={{ background: '#f8fafc', borderColor: '#e2e8f0' }}>
 
-            {/* Resource Type Dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setTypeDropdownOpen(!typeDropdownOpen)}
-                className="flex items-center gap-2 bg-white border border-[#ccc] px-3 py-1 text-[11px] font-bold text-[#185baf] uppercase tracking-widest hover:border-[#185baf] transition-colors min-w-[110px] justify-between"
-              >
-                <span className="flex items-center gap-1.5">{current.icon}{current.label}</span>
-                <ChevronDown className="w-3 h-3" />
-              </button>
-              {typeDropdownOpen && (
-                <div className="absolute top-full left-0 mt-1 bg-white border border-[#ccc] shadow-lg z-50 min-w-[110px]">
-                  {(['Room', 'Faculty', 'Cohort'] as ResourceType[]).map(type => (
-                    <button
-                      key={type}
-                      onClick={() => { setResourceType(type); setTypeDropdownOpen(false); setSearchQuery(''); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-widest transition-colors text-left
-                        ${resourceType === type ? 'bg-[#185baf] text-white' : 'text-[#333] hover:bg-[#e6e6e6]'}`}
-                    >
-                      {typeConfig[type].icon}{typeConfig[type].label}
-                    </button>
-                  ))}
-                </div>
-              )}
+            {/* Resource type — segmented pills */}
+            <div className="flex items-center bg-[#e2e8f0] rounded-full p-0.5 gap-0.5">
+              {(['Room', 'Faculty', 'Cohort'] as ResourceType[]).map(type => (
+                <button
+                  key={type}
+                  onClick={() => { setResourceType(type); setSearchQuery(''); }}
+                  className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-bold uppercase tracking-wide rounded-full transition-all"
+                  style={resourceType === type
+                    ? { background: typeConfig[type].accent, color: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.2)' }
+                    : { color: '#64748b' }
+                  }
+                >
+                  {typeConfig[type].icon}
+                  {typeConfig[type].label}
+                </button>
+              ))}
             </div>
 
+            <div className="w-px h-5 bg-[#e2e8f0]" />
+
+            {/* Day */}
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-[#666] uppercase tracking-wide">Day</span>
-              <select value={day} onChange={e => setDay(e.target.value as DayOfWeek)} className="bg-white text-black border border-[#ccc] px-2 py-1 text-xs font-bold outline-none focus:border-[#185baf] cursor-pointer">
+              <span className="text-[9px] font-black text-[#94a3b8] uppercase tracking-widest">Day</span>
+              <select value={day} onChange={e => setDay(e.target.value as DayOfWeek)} className={selectCls}>
                 {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
 
+            {/* Time range */}
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-[#666] uppercase tracking-wide text-nowrap">From</span>
-              <select value={startTimeFilter} onChange={e => setStartTimeFilter(e.target.value)} className="bg-white text-black border border-[#ccc] px-2 py-1 text-xs font-bold outline-none focus:border-[#185baf] cursor-pointer">
+              <span className="text-[9px] font-black text-[#94a3b8] uppercase tracking-widest">From</span>
+              <select value={startTimeFilter} onChange={e => setStartTimeFilter(e.target.value)} className={selectCls}>
                 {TIME_SLOTS.map(t => <option key={t} value={t}>{formatTime12h(t)}</option>)}
               </select>
-              <span className="text-[10px] font-bold text-[#666] uppercase tracking-wide text-nowrap">To</span>
-              <select value={endTimeFilter} onChange={e => setEndTimeFilter(e.target.value)} className="bg-white text-black border border-[#ccc] px-2 py-1 text-xs font-bold outline-none focus:border-[#185baf] cursor-pointer">
+              <span className="text-[9px] font-black text-[#94a3b8] uppercase tracking-widest">To</span>
+              <select value={endTimeFilter} onChange={e => setEndTimeFilter(e.target.value)} className={selectCls}>
                 {TIME_SLOTS.map(t => <option key={t} value={t}>{formatTime12h(t)}</option>)}
               </select>
             </div>
 
+            {/* Week */}
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-[#666] uppercase tracking-wide text-nowrap">Week</span>
-              <select value={week} onChange={e => setWeek(Number(e.target.value))} className="bg-white text-black border border-[#ccc] px-2 py-1 text-xs font-bold outline-none focus:border-[#185baf] cursor-pointer">
+              <span className="text-[9px] font-black text-[#94a3b8] uppercase tracking-widest">Week</span>
+              <select value={week} onChange={e => setWeek(Number(e.target.value))} className={selectCls}>
                 {Array.from({ length: TOTAL_WEEKS }, (_, i) => i + 1).map(w => <option key={w} value={w}>Week {w}</option>)}
               </select>
             </div>
 
-            <div className="flex-1 min-w-[180px] relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#999] z-10" />
+            <div className="w-px h-5 bg-[#e2e8f0]" />
+
+            {/* Search */}
+            <div className="flex-1 min-w-[200px] relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#94a3b8] pointer-events-none" />
               <input
                 type="text"
-                placeholder={`SEARCH ${resourceType.toUpperCase()}S...`}
+                placeholder={`Search ${resourceType.toLowerCase()}s…`}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full bg-white text-black border border-[#ccc] pl-9 pr-4 py-1 text-xs font-bold outline-none focus:border-[#185baf] placeholder:text-[#ccc] uppercase tracking-widest"
+                className="w-full bg-white border border-[#e2e8f0] pl-9 pr-4 py-1.5 text-[11px] font-bold outline-none focus:border-[#185baf] placeholder:text-[#cbd5e1] text-[#1e293b] transition-colors"
               />
             </div>
           </div>
 
-          {/* Grid */}
-          <div className="flex-1 overflow-auto custom-scrollbar bg-white p-1">
+          {/* ── Grid ────────────────────────────────────────── */}
+          <div className="flex-1 overflow-auto custom-scrollbar" style={{ background: '#f1f5f9' }}>
             <table className="w-full border-collapse table-fixed">
               <thead className="sticky top-0 z-20">
                 <tr>
-                  <th className="bg-[#f9f9f9] border-r border-b border-[#ccc] p-1.5 w-[140px] sticky left-0 z-30 text-[9px] font-bold text-[#666] uppercase tracking-widest text-left">
-                    {resourceType}
+                  {/* Resource header */}
+                  <th className="sticky left-0 z-30 w-[160px] px-3 py-2 text-left border-r border-b"
+                    style={{ background: '#1e293b', borderColor: '#334155' }}>
+                    <div className="flex items-center gap-1.5" style={{ color: accentColor }}>
+                      {current.icon}
+                      <span className="text-[9px] font-black uppercase tracking-widest">{resourceType}</span>
+                    </div>
                   </th>
-                  {filteredTimeSlots.map(t => (
-                    <th key={t} className={`bg-[#fdfdfd] border-b border-[#ccc] p-1 text-[9px] font-bold text-[#999] uppercase tracking-tighter ${t.endsWith(':00') ? 'border-r border-[#e0e0e0]' : 'border-r border-[#f5f5f5]'}`}>
-                      {t.endsWith(':00') ? formatTime12h(t).split(':')[0] : ''}
-                    </th>
-                  ))}
+                  {/* Time slot headers */}
+                  {filteredTimeSlots.map(t => {
+                    const isHour = t.endsWith(':00');
+                    const busyCount = columnBusy[t] || 0;
+                    const heatPct = resources.length > 0 ? (busyCount / resources.length) * 100 : 0;
+                    return (
+                      <th key={t}
+                        className="border-b border-r p-0 relative"
+                        style={{
+                          borderColor: isHour ? '#334155' : '#2d3748',
+                          background: '#1e293b',
+                          minWidth: 28,
+                        }}>
+                        {/* Heat strip */}
+                        {heatPct > 0 && (
+                          <div className="absolute bottom-0 left-0 right-0"
+                            style={{ height: `${Math.min(heatPct * 0.6, 4)}px`, background: heatPct > 60 ? '#f87171' : '#fbbf24', opacity: 0.7 }} />
+                        )}
+                        <div className="py-1.5 flex items-center justify-center">
+                          {isHour ? (
+                            <span className="text-[9px] font-black text-white/70 tracking-tight">
+                              {formatTime12h(t).replace(':00', '').replace(' ', '')}
+                            </span>
+                          ) : (
+                            <span className="text-[7px] font-bold text-white/20">·</span>
+                          )}
+                        </div>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
-                {resources.map(resource => (
-                  <tr key={resource.id} className="group hover:bg-[#f5faff]">
-                    <td className="bg-[#f9f9f9] border-r border-b border-[#ccc] px-2 py-1 sticky left-0 z-10 w-[140px]">
-                      <div className="text-[10px] font-bold text-[#185baf] uppercase tracking-tight truncate">{resource.name}</div>
-                      <div className="text-[8px] text-[#999] font-bold uppercase tracking-tight truncate">{resource.sub}</div>
+                {resources.map((resource, rowIdx) => (
+                  <tr key={resource.id} className="group">
+                    {/* Resource label */}
+                    <td className="sticky left-0 z-10 w-[160px] px-3 py-1.5 border-r border-b"
+                      style={{
+                        background: rowIdx % 2 === 0 ? '#fff' : '#f8fafc',
+                        borderColor: '#e2e8f0',
+                        borderLeft: `3px solid ${accentColor}`,
+                      }}>
+                      <div className="text-[10px] font-bold truncate" style={{ color: accentColor }}>{resource.name}</div>
+                      <div className="text-[8px] font-bold text-[#94a3b8] uppercase tracking-tight truncate mt-0.5">{resource.sub}</div>
                     </td>
+
+                    {/* Time cells */}
                     {filteredTimeSlots.map(t => {
                       const usage = getSlotUsage(resource.id, t);
-                      let bgColor = 'bg-[#5cb85c]/10 hover:bg-[#5cb85c]/30 cursor-pointer';
+                      const isHour = t.endsWith(':00');
+
+                      let cellStyle: React.CSSProperties = {
+                        background: rowIdx % 2 === 0 ? '#fff' : '#f8fafc',
+                        borderRight: isHour ? '1px solid #cbd5e1' : '1px solid #e2e8f0',
+                        borderBottom: '1px solid #e2e8f0',
+                        cursor: 'pointer',
+                      };
                       let content: React.ReactNode = null;
 
                       if (usage.status === 'busy') {
-                        bgColor = 'bg-[#d9534f] hover:bg-[#c9302c] cursor-pointer';
+                        cellStyle.background = '#fee2e2';
+                        cellStyle.borderBottom = '1px solid #fca5a5';
                         const firstGroup = groups.find(g => g.id === (usage.session!.groupIds || [])[0]);
-                        content = <span className="text-[7px] font-bold text-white uppercase tracking-tighter pointer-events-none">{firstGroup?.name.substring(0, 5)}</span>;
+                        content = (
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-0.5">
+                            <div className="w-full h-[3px]" style={{ background: '#ef4444' }} />
+                            <span className="text-[6px] font-black text-[#991b1b] uppercase tracking-tight px-0.5 text-center leading-tight">
+                              {firstGroup?.name?.substring(0, 6) || '●'}
+                            </span>
+                          </div>
+                        );
                       } else if (usage.status === 'conflict') {
-                        bgColor = 'bg-[#7f1d1d] hover:bg-[#6f0d0d] cursor-pointer';
-                        content = <span className="text-[7px] font-bold text-white uppercase tracking-tighter">!!!</span>;
+                        cellStyle.background = '#fef3c7';
+                        cellStyle.borderBottom = '1px solid #fcd34d';
+                        content = (
+                          <div className="w-full h-full flex flex-col items-center justify-center">
+                            <div className="w-full h-[3px]" style={{ background: '#f59e0b' }} />
+                            <span className="text-[7px] font-black text-[#92400e]">⚠</span>
+                          </div>
+                        );
                       }
 
                       const titleText = usage.status === 'free'
@@ -228,11 +321,22 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
                         <td
                           key={t}
                           title={titleText}
+                          style={cellStyle}
+                          className="p-0 h-8 select-none transition-all"
                           onDoubleClick={() => {
                             onCellDoubleClick(viewTypeMap[resourceType], resource.id, day, t);
                             onClose();
                           }}
-                          className={`border-b border-[#eee] p-0 h-8 transition-colors select-none ${bgColor} ${t.endsWith(':00') ? 'border-r border-[#e0e0e0]' : 'border-r border-[#f5f5f5]'}`}
+                          onMouseEnter={e => {
+                            if (usage.status === 'free') (e.currentTarget as HTMLElement).style.background = '#dbeafe';
+                            else if (usage.status === 'busy') (e.currentTarget as HTMLElement).style.background = '#fecaca';
+                            else (e.currentTarget as HTMLElement).style.background = '#fde68a';
+                          }}
+                          onMouseLeave={e => {
+                            if (usage.status === 'free') (e.currentTarget as HTMLElement).style.background = rowIdx % 2 === 0 ? '#fff' : '#f8fafc';
+                            else if (usage.status === 'busy') (e.currentTarget as HTMLElement).style.background = '#fee2e2';
+                            else (e.currentTarget as HTMLElement).style.background = '#fef3c7';
+                          }}
                         >
                           <div className="w-full h-full flex items-center justify-center overflow-hidden">
                             {content}
@@ -242,20 +346,36 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
                     })}
                   </tr>
                 ))}
+
+                {resources.length === 0 && (
+                  <tr>
+                    <td colSpan={filteredTimeSlots.length + 1} className="py-16 text-center">
+                      <div className="flex flex-col items-center gap-2 opacity-40">
+                        <Search className="w-8 h-8 text-[#94a3b8]" />
+                        <p className="text-[11px] font-bold text-[#94a3b8] uppercase tracking-widest">No {resourceType.toLowerCase()}s found</p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
 
-          {/* Footer */}
-          <div className="px-4 py-1.5 bg-[#f0f0f0] border-t border-[#ccc] flex justify-between items-center">
-            <div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest text-[#333]">
-              <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-[#666]" />{day} · Week {week}</span>
-              <span className="w-px h-3 bg-[#ccc]" />
-              <span>{resources.length} {resourceType}s shown</span>
+          {/* ── Footer ──────────────────────────────────────── */}
+          <div className="shrink-0 px-4 py-2 flex justify-between items-center border-t" style={{ background: '#1e293b', borderColor: '#334155' }}>
+            <div className="flex items-center gap-4 text-[9px] font-black uppercase tracking-widest">
+              <span className="flex items-center gap-1.5 text-white/50">
+                <Calendar className="w-3.5 h-3.5" />
+                {day} · Week {week}
+              </span>
+              <span className="w-px h-3 bg-white/10" />
+              <span style={{ color: accentColor }}>{resources.length} {resourceType.toLowerCase()}s shown</span>
+              <span className="w-px h-3 bg-white/10" />
+              <span className="text-white/30">{filteredTimeSlots.length} time slots</span>
             </div>
-            <div className="text-[9px] text-[#999] font-bold uppercase tracking-widest italic">
+            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest italic">
               Double-click any cell to create event or open timetable
-            </div>
+            </span>
           </div>
         </motion.div>
       </div>
