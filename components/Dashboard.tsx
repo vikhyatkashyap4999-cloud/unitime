@@ -38,8 +38,8 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
     const set = new Set<string>();
     effectiveSchedule.forEach(s => {
       const f = faculties.find(f => f.id === s.facultyId);
-      const dept = (f as any)?._deptName || f?.department;
-      if (dept) set.add(dept);
+      const dept = (f as any)?._deptName || f?.department || 'General';
+      set.add(dept);
     });
     return Array.from(set).sort();
   }, [effectiveSchedule, faculties]);
@@ -168,8 +168,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
       </header>
 
       {/* School Slicer */}
-      {allSchools.length > 0 && (
-        <div className="mb-4 bg-[#f8faff] border border-[#d0e4f8] p-3">
+      <div className="mb-4 bg-[#f8faff] border border-[#d0e4f8] p-3">
           <div className="flex items-center gap-2 mb-2">
             <Filter className="w-3.5 h-3.5 text-[#5a7ba8]" />
             <span className="text-[10px] font-bold text-[#5a7ba8] uppercase tracking-widest">Filter by School</span>
@@ -219,7 +218,6 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
             </button>
           </div>
         </div>
-      )}
 
       {/* Stat Boxes */}
       <div className="flex flex-wrap gap-2 mb-4">

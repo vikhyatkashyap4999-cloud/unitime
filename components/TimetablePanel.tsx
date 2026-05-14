@@ -385,7 +385,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                     )}
                   </div>
                   {/* Individual checkboxes */}
-                  <div className="max-h-72 overflow-y-auto p-1 text-black custom-scrollbar bg-white">
+                  <div className="max-h-56 overflow-y-auto p-1 text-black custom-scrollbar bg-white">
                     {resourceOptions.length > 0 ? (
                       resourceOptions.map(opt => (
                         <label
@@ -413,6 +413,18 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                         <p className="text-xs font-bold text-[#999] uppercase tracking-widest">No {viewType}s Found</p>
                       </div>
                     )}
+                  </div>
+                  {/* Done button */}
+                  <div className="px-3 py-2 bg-[#f8f9fa] border-t border-[#ccc] flex items-center justify-between">
+                    <span className="text-[9px] font-bold text-[#888] uppercase tracking-wide">
+                      {selectedIds.length} selected
+                    </span>
+                    <button
+                      onClick={() => { setIsSelectorOpen(false); setSearchQuery(''); }}
+                      className="px-4 py-1 text-[10px] font-bold bg-[#185baf] text-white border border-[#0d3b76] hover:bg-[#124584] transition-colors uppercase tracking-widest"
+                    >
+                      Done
+                    </button>
                   </div>
                 </div>
               )}
