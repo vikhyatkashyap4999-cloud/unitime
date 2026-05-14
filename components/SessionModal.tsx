@@ -234,9 +234,9 @@ const SessionModal: React.FC<SessionModalProps> = ({
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="p-4 space-y-4 max-h-[75vh] overflow-y-auto custom-scrollbar">
-            <div className="bg-white border border-[#ccc] p-3 space-y-3">
-              <SearchableDropdown 
+          <form onSubmit={handleSubmit} className="p-3 space-y-3 max-h-[88vh] overflow-y-auto custom-scrollbar">
+            <div className="bg-white border border-[#ccc] p-2.5 space-y-2.5">
+              <SearchableDropdown
                 label={<span>Course / Module <span className="text-red-500">*</span></span>}
                 icon={<BookOpen className="w-3.5 h-3.5" />}
                 options={courses.map(c => ({ id: c.id, name: `${c.code} - ${c.name}`, sub: `${c.credits} Credits · ${c.department}` }))}
@@ -246,7 +246,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
                 required
               />
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-2">
                   <SearchableDropdown
                     label="Event Type"
@@ -283,7 +283,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <SearchableDropdown
                   label="Start Time"
                   icon={<Clock className="w-3.5 h-3.5" />}
@@ -302,7 +302,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
             </div>
 
             {/* Recurring Settings */}
-            <div className="bg-white border border-[#ccc] p-3 space-y-3">
+            <div className="bg-white border border-[#ccc] p-2.5 space-y-2">
               <div className="flex items-center justify-between pb-2 border-b border-[#eee]">
                 <div className="flex items-center gap-2">
                   <RefreshCw className="w-3.5 h-3.5 text-[#555]" />
@@ -380,52 +380,53 @@ const SessionModal: React.FC<SessionModalProps> = ({
             </div>
 
             {/* Assignments */}
-            <div className="bg-white border border-[#ccc] p-3 space-y-3">
-              <SearchableDropdown 
-                label={<span>Staff / Faculty <span className="text-red-500">*</span></span>}
-                icon={<User className="w-3.5 h-3.5" />}
-                options={faculties.map(f => {
-                   const load = getFacultyLoad(f.id);
-                   const isCritical = load >= f.maxHoursPerWeek;
-                   return { 
-                     id: f.id, 
-                     name: `${f.name} (${f.facultyId || f.id})`, 
-                     sub: `${f.department} · Limit: ${f.maxHoursPerWeek}h`,
-                     extra: <span className={`text-[9px] font-bold px-1 border ${isCritical ? 'bg-red-50 text-red-600 border-red-300' : 'bg-green-50 text-green-600 border-green-300'}`}>{load.toFixed(1)}h</span>
-                   };
-                })}
-                value={formData.facultyId || ''}
-                onChange={id => setFormData({ ...formData, facultyId: id })}
-                placeholder="Select Faculty"
-                required
-              />
-              
+            <div className="bg-white border border-[#ccc] p-2.5 space-y-2.5">
+              <div className="grid grid-cols-2 gap-3">
+                <SearchableDropdown
+                  label={<span>Staff / Faculty <span className="text-red-500">*</span></span>}
+                  icon={<User className="w-3.5 h-3.5" />}
+                  options={faculties.map(f => {
+                     const load = getFacultyLoad(f.id);
+                     const isCritical = load >= f.maxHoursPerWeek;
+                     return {
+                       id: f.id,
+                       name: `${f.name} (${f.facultyId || f.id})`,
+                       sub: `${f.department} · Limit: ${f.maxHoursPerWeek}h`,
+                       extra: <span className={`text-[9px] font-bold px-1 border ${isCritical ? 'bg-red-50 text-red-600 border-red-300' : 'bg-green-50 text-green-600 border-green-300'}`}>{load.toFixed(1)}h</span>
+                     };
+                  })}
+                  value={formData.facultyId || ''}
+                  onChange={id => setFormData({ ...formData, facultyId: id })}
+                  placeholder="Select Faculty"
+                  required
+                />
+                <SearchableDropdown
+                  label={<span>Room / Venue <span className="text-red-500">*</span></span>}
+                  icon={<MapPin className="w-3.5 h-3.5" />}
+                  options={rooms.map(r => ({ id: r.id, name: r.name, sub: `${r.type} · Cap: ${r.capacity}` }))}
+                  value={formData.roomId || ''}
+                  onChange={id => setFormData({ ...formData, roomId: id })}
+                  placeholder="Select Room"
+                  required
+                />
+              </div>
+
               {selectedFaculty && (
-                <div className="bg-[#f8f9fa] border border-[#ccc] p-2">
+                <div className="bg-[#f8f9fa] border border-[#ccc] p-1.5">
                   <div className="flex justify-between items-center mb-1">
-                    <span className="text-[9px] font-bold text-[#666] uppercase">Load Utilization</span>
+                    <span className="text-[9px] font-bold text-[#666] uppercase">Load Utilization — {selectedFaculty.name}</span>
                     <span className={`text-[9px] font-bold ${loadPercentage >= 100 ? 'text-[#d9534f]' : 'text-[#185baf]'}`}>
-                      {currentFacultyLoad.toFixed(1)} / {selectedFaculty.maxHoursPerWeek} Hours
+                      {currentFacultyLoad.toFixed(1)} / {selectedFaculty.maxHoursPerWeek}h
                     </span>
                   </div>
                   <div className="h-1.5 w-full bg-[#ccc] border border-[#b3b3b3]">
-                    <div 
-                      className={`h-full ${loadPercentage >= 100 ? 'bg-[#d9534f]' : loadPercentage > 80 ? 'bg-[#f0ad4e]' : 'bg-[#185baf]'}`} 
-                      style={{ width: `${Math.min(100, loadPercentage)}%` }} 
+                    <div
+                      className={`h-full ${loadPercentage >= 100 ? 'bg-[#d9534f]' : loadPercentage > 80 ? 'bg-[#f0ad4e]' : 'bg-[#185baf]'}`}
+                      style={{ width: `${Math.min(100, loadPercentage)}%` }}
                     />
                   </div>
                 </div>
               )}
-
-              <SearchableDropdown 
-                label={<span>Room / Venue <span className="text-red-500">*</span></span>}
-                icon={<MapPin className="w-3.5 h-3.5" />}
-                options={rooms.map(r => ({ id: r.id, name: r.name, sub: `${r.type} · Cap: ${r.capacity}` }))}
-                value={formData.roomId || ''}
-                onChange={id => setFormData({ ...formData, roomId: id })}
-                placeholder="Select Room"
-                required
-              />
 
               <MultiSearchableDropdown
                 label={<span>Cohorts <span className="text-red-500">*</span></span>}

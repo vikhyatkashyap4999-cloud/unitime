@@ -321,8 +321,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
           </div>
 
           {/* Faculty Load by Weekday — school-synced */}
-          {allSchools.length > 0 && (
-            <div className="bg-white border border-[#ccc] p-3 flex flex-col">
+          <div className="bg-white border border-[#ccc] p-3 flex flex-col">
               <div className="flex justify-between items-center mb-3 border-b border-[#eee] pb-2">
                 <h4 className="text-[12px] font-bold text-[#333] tracking-wide uppercase">
                   Sessions by Weekday
@@ -364,7 +363,7 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
                 )}
               </div>
             </div>
-          )}
+          </div>
         </div>
 
         {/* Right column */}
