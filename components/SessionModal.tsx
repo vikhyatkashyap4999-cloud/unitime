@@ -361,13 +361,13 @@ const SessionModal: React.FC<SessionModalProps> = ({
                   {(formData.weeks || []).length === TOTAL_WEEKS ? 'Clear All' : 'Select All'}
                 </button>
               </div>
-              <div className="grid grid-cols-10 gap-1 bg-[#f8f9fa] border border-[#ccc] p-1.5">
+              <div className="grid grid-cols-[repeat(13,1fr)] gap-0.5 bg-[#f8f9fa] border border-[#ccc] p-1">
                 {Array.from({ length: TOTAL_WEEKS }, (_, i) => i + 1).map(week => (
                   <button
                     key={week}
                     type="button"
                     onClick={() => toggleWeek(week)}
-                    className={`py-1 border text-[9px] font-bold text-center ${
+                    className={`py-0.5 border text-[9px] font-bold text-center leading-none ${
                       (formData.weeks || []).includes(week)
                       ? 'bg-[#185baf] text-white border-[#0d3b76]'
                       : 'bg-white text-[#333] border-[#ccc] hover:bg-[#e6e6e6]'

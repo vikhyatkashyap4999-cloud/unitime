@@ -119,6 +119,15 @@ export const SearchableDropdown: React.FC<SearchableDropdownProps> = ({
                   </div>
                 )}
               </div>
+              <div className="p-1.5 border-t border-[#eee] bg-[#f8f9fa]">
+                <button
+                  type="button"
+                  onClick={() => { setIsOpen(false); setSearch(''); }}
+                  className="w-full py-1 text-[10px] font-bold bg-[#185baf] text-white border border-[#0d3b76] hover:bg-[#124584] transition-colors uppercase tracking-widest"
+                >
+                  Done
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -272,6 +281,18 @@ export const MultiSearchableDropdown: React.FC<MultiSearchableDropdownProps> = (
                     <p className="text-[10px] font-bold text-[#999] uppercase tracking-widest">No results found</p>
                   </div>
                 )}
+              </div>
+              <div className="p-1.5 border-t border-[#eee] bg-[#f8f9fa] flex items-center justify-between gap-2">
+                <span className="text-[9px] font-bold text-[#888] uppercase tracking-wide">
+                  {values.length} selected
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setIsOpen(false); setSearch(''); }}
+                  className="px-4 py-1 text-[10px] font-bold bg-[#185baf] text-white border border-[#0d3b76] hover:bg-[#124584] transition-colors uppercase tracking-widest"
+                >
+                  Done
+                </button>
               </div>
             </motion.div>
           )}

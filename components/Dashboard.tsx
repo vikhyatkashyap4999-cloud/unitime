@@ -1,8 +1,8 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { MapPin, AlertTriangle, Clock, BookOpen, Database, Calendar, Filter, X } from 'lucide-react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { MapPin, AlertTriangle, Clock, BookOpen, Database, Calendar, Filter, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, Tooltip, XAxis, YAxis, CartesianGrid,
-  ResponsiveContainer, LabelList, Cell
+  ResponsiveContainer, LabelList, Cell, Legend
 } from 'recharts';
 import { Course, Room, StudentGroup, ScheduleEntry, Clash, Term, Faculty } from '../types';
 import { DataService } from '../services/dataService';
@@ -22,6 +22,7 @@ const SCHOOL_COLORS = ['#185baf', '#0891b2', '#059669', '#d97706', '#7c3aed', '#
 const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule, clashes, activeTerm, faculties }) => {
 
   const [selectedSchool, setSelectedSchool] = useState<string | null>(null);
+  const slicerScrollRef = useRef<HTMLDivElement>(null);
 
   // Reset slicer when active term changes
   useEffect(() => { setSelectedSchool(null); }, [activeTerm?.id]);
@@ -104,6 +105,27 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
     }).filter(f => f.load > 0).sort((a, b) => b.load - a.load).slice(0, 5);
   }, [faculties, slicedSchedule]);
 
+  const schoolDayData = useMemo(() => {
+    const days   = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const schoolsToShow = selectedSchool ? [selectedSchool] : allSchools.slice(0, 6);
+    return days.map((day, i) => {
+      const entry: Record<string, any> = { name: labels[i] };
+      let total = 0;
+      schoolsToShow.forEach(school => {
+        const count = effectiveSchedule.filter(s => {
+          const f = faculties?.find(f => f.id === s.facultyId);
+          const dept = (f as any)?._deptName || f?.department || 'General';
+          return dept === school && s.day === day;
+        }).length;
+        entry[school] = count;
+        total += count;
+      });
+      entry._total = total;
+      return entry;
+    });
+  }, [effectiveSchedule, faculties, allSchools, selectedSchool]);
+
   const statCards = [
     { icon: BookOpen, title: 'COURSES',  value: selectedSchool ? slicedCourseIds.size : courses.length,    sub: 'Modules',   color: '#6366f1', grad: 'linear-gradient(135deg,#4338ca,#6366f1)', bg: '#eef2ff' },
     { icon: MapPin,   title: 'ROOMS',    value: selectedSchool ? slicedRoomIds.size   : rooms.length,      sub: 'Venues',    color: '#0891b2', grad: 'linear-gradient(135deg,#0e7490,#06b6d4)', bg: '#ecfeff' },
@@ -159,28 +181,42 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
               </button>
             )}
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+          <div className="relative flex items-center gap-1">
             <button
-              onClick={() => setSelectedSchool(null)}
-              className={`shrink-0 px-3 py-1 text-[10px] font-bold uppercase tracking-wide rounded-full border transition-all ${
-                !selectedSchool
-                  ? 'bg-[#185baf] text-white border-[#185baf] shadow'
-                  : 'bg-white text-[#555] border-[#ccc] hover:border-[#185baf] hover:text-[#185baf]'
-              }`}>
-              All Schools
+              onClick={() => slicerScrollRef.current?.scrollBy({ left: -200, behavior: 'smooth' })}
+              className="shrink-0 w-6 h-6 flex items-center justify-center border border-[#ccc] bg-white hover:bg-[#f0f5ff] hover:border-[#185baf] text-[#555] hover:text-[#185baf] transition-all rounded-full"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
             </button>
-            {allSchools.map(school => (
+            <div ref={slicerScrollRef} className="flex gap-2 overflow-x-auto pb-1 flex-1" style={{ scrollbarWidth: 'none' }}>
               <button
-                key={school}
-                onClick={() => setSelectedSchool(s => s === school ? null : school)}
-                className={`shrink-0 px-3 py-1 text-[10px] font-bold uppercase tracking-wide rounded-full border transition-all whitespace-nowrap ${
-                  selectedSchool === school
+                onClick={() => setSelectedSchool(null)}
+                className={`shrink-0 px-3 py-1 text-[10px] font-bold uppercase tracking-wide rounded-full border transition-all ${
+                  !selectedSchool
                     ? 'bg-[#185baf] text-white border-[#185baf] shadow'
                     : 'bg-white text-[#555] border-[#ccc] hover:border-[#185baf] hover:text-[#185baf]'
                 }`}>
-                {school}
+                All Schools
               </button>
-            ))}
+              {allSchools.map(school => (
+                <button
+                  key={school}
+                  onClick={() => setSelectedSchool(s => s === school ? null : school)}
+                  className={`shrink-0 px-3 py-1 text-[10px] font-bold uppercase tracking-wide rounded-full border transition-all whitespace-nowrap ${
+                    selectedSchool === school
+                      ? 'bg-[#185baf] text-white border-[#185baf] shadow'
+                      : 'bg-white text-[#555] border-[#ccc] hover:border-[#185baf] hover:text-[#185baf]'
+                  }`}>
+                  {school}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => slicerScrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
+              className="shrink-0 w-6 h-6 flex items-center justify-center border border-[#ccc] bg-white hover:bg-[#f0f5ff] hover:border-[#185baf] text-[#555] hover:text-[#185baf] transition-all rounded-full"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       )}
@@ -283,6 +319,52 @@ const Dashboard: React.FC<DashboardProps> = ({ courses, rooms, groups, schedule,
               )}
             </div>
           </div>
+
+          {/* Faculty Load by Weekday — school-synced */}
+          {allSchools.length > 0 && (
+            <div className="bg-white border border-[#ccc] p-3 flex flex-col">
+              <div className="flex justify-between items-center mb-3 border-b border-[#eee] pb-2">
+                <h4 className="text-[12px] font-bold text-[#333] tracking-wide uppercase">
+                  Sessions by Weekday
+                  {selectedSchool && <span className="ml-2 text-[#185baf] normal-case font-medium text-[11px]">— {selectedSchool}</span>}
+                </h4>
+                <span className="text-[10px] font-bold text-[#888] uppercase">
+                  {selectedSchool ? 'School Breakdown' : `Top ${Math.min(allSchools.length, 6)} Schools`}
+                </span>
+              </div>
+              <div className="h-[220px] w-full">
+                {schoolDayData.some(d => d._total > 0) ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={schoolDayData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                      <XAxis dataKey="name" axisLine={{ stroke: '#999' }} tickLine={false} tick={{ fontSize: 11, fill: '#666' }} dy={6} />
+                      <YAxis axisLine={{ stroke: '#999' }} tickLine={false} tick={{ fontSize: 10, fill: '#888' }} />
+                      <Tooltip
+                        contentStyle={{ fontSize: '11px', fontWeight: 'bold', padding: '6px 10px' }}
+                        formatter={(v: any, name: string) => [v, name]}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase', paddingTop: 4 }} />
+                      {(selectedSchool ? [selectedSchool] : allSchools.slice(0, 6)).map((school, i) => (
+                        <Bar key={school} dataKey={school} stackId="a" fill={SCHOOL_COLORS[i % SCHOOL_COLORS.length]} barSize={28}>
+                          {i === (selectedSchool ? 0 : Math.min(allSchools.length, 6) - 1) && (
+                            <LabelList dataKey="_total" position="top"
+                              content={({ x, y, width, value }: any) =>
+                                value > 0 ? <text x={x + width / 2} y={y - 4} fill="#555" fontSize={9} fontWeight="bold" textAnchor="middle">{value}</text> : null
+                              }
+                            />
+                          )}
+                        </Bar>
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-[10px] font-bold text-[#999] uppercase tracking-wider">
+                    No session data for selected filters.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right column */}
