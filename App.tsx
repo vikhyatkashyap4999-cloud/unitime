@@ -586,7 +586,7 @@ const App: React.FC = () => {
       const deletedIds = courses.filter(old => !updatedCourses.some(n => n.id === old.id)).map(c => c.id);
       setCourses(updatedCourses);
       await DataService.saveEntity('courses', 'unitime_courses', updatedCourses, effectiveActiveTerm?.id, onProgress);
-      for (const id of deletedIds) await DataService.deleteRecord('courses', id);
+      await DataService.deleteRecords('courses', deletedIds);
     });
   };
 
@@ -595,7 +595,7 @@ const App: React.FC = () => {
       const deletedIds = faculties.filter(old => !updatedFaculties.some(n => n.id === old.id)).map(f => f.id);
       setFaculties(updatedFaculties);
       await DataService.saveEntity('faculties', 'unitime_faculties', updatedFaculties, effectiveActiveTerm?.id, onProgress);
-      for (const id of deletedIds) await DataService.deleteRecord('faculties', id);
+      await DataService.deleteRecords('faculties', deletedIds);
     });
   };
 
@@ -604,7 +604,7 @@ const App: React.FC = () => {
       const deletedIds = rooms.filter(old => !updatedRooms.some(n => n.id === old.id)).map(r => r.id);
       setRooms(updatedRooms);
       await DataService.saveEntity('rooms', 'unitime_rooms', updatedRooms, effectiveActiveTerm?.id, onProgress);
-      for (const id of deletedIds) await DataService.deleteRecord('rooms', id);
+      await DataService.deleteRecords('rooms', deletedIds);
     });
   };
 
@@ -613,7 +613,7 @@ const App: React.FC = () => {
       const deletedIds = groups.filter(old => !updatedGroups.some(n => n.id === old.id)).map(g => g.id);
       setGroups(updatedGroups);
       await DataService.saveEntity('groups', 'unitime_groups', updatedGroups, effectiveActiveTerm?.id, onProgress);
-      for (const id of deletedIds) await DataService.deleteRecord('groups', id);
+      await DataService.deleteRecords('groups', deletedIds);
     });
   };
 

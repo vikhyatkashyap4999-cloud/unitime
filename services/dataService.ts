@@ -296,6 +296,17 @@ export class DataService {
     }
   }
 
+  static async deleteRecords(tableName: string, ids: string[]): Promise<void> {
+    if (!supabase || ids.length === 0) return;
+    try {
+      const { error } = await supabase.from(tableName).delete().in('id', ids);
+      if (error) console.error(`[DB] deleteRecords error for ${tableName}:`, error.message);
+      else console.log(`[DB] ${tableName}: bulk-deleted ${ids.length} records`);
+    } catch (err) {
+      console.error(`[DB] deleteRecords crash on ${tableName}:`, err);
+    }
+  }
+
   // ─── Schedule granular operations (multi-user safe) ──────────────────────────
   // Each method only touches the specific rows that changed.
 
