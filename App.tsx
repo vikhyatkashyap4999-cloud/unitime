@@ -1071,7 +1071,7 @@ const App: React.FC = () => {
               uploaded files, generated results, and progress state are never lost. */}
           {(currentUser.role !== Role.VIEWER) && (
             <div className={`h-full ${activeTab !== 'autoschedule' ? 'hidden' : ''}`}>
-              <AutoSchedulePanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} activeTermId={effectiveActiveTerm?.id} onApplySchedule={handleSaveSession} currentUser={currentUser} />
+              <AutoSchedulePanel courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} activeTermId={effectiveActiveTerm?.id} onApplySchedule={handleSaveSession} currentUser={currentUser} schedule={schedule} />
             </div>
           )}
           {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} />}

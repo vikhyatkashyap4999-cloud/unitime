@@ -20,6 +20,7 @@ interface Props {
   activeTermId: string | null;
   onApplySchedule: (entries: Omit<ScheduleEntry, 'id' | 'departmentId'>[]) => Promise<void>;
   currentUser: UserAccount;
+  schedule: ScheduleEntry[];
 }
 
 type Stage = 'idle' | 'running' | 'done';
@@ -49,11 +50,13 @@ const COLS: [string, string, string, string, string][] = [
   ['Campus',             'K1, K2, AB, RD…',           '#0891b2', '#ecfeff', '#a5f3fc'],
   ['Cohort1–12',         'shared cohorts on one row',  '#0891b2', '#ecfeff', '#a5f3fc'],
   ['FixedRoom',          'locks to this exact room',   '#d97706', '#fffbeb', '#fde68a'],
-  ['PreferredRooms',     '"R1,R2" tried before auto',  '#d97706', '#fffbeb', '#fde68a'],
+  ['PreferredRooms',     'R1|R2 pipe-separated',       '#d97706', '#fffbeb', '#fde68a'],
   ['LabHours',           '2 or 4  (numbers only)',     '#7c3aed', '#f5f3ff', '#ddd6fe'],
   ['Semester',           'label e.g. Semester 1',      '#059669', '#ecfdf5', '#a7f3d0'],
-  ['Day-For-Block',      'Monday / "Mon,Wed" to block','#e11d48', '#fff1f2', '#fecdd3'],
-  ['Time-For-Block',     '"10" or "8,9,14" (hours)',   '#e11d48', '#fff1f2', '#fecdd3'],
+  ['FacultyBlockDay',    'Mon / "Mon|Wed" to block',   '#e11d48', '#fff1f2', '#fecdd3'],
+  ['FacultyBlockTime',   '"10" or "8|9|14" (hours)',   '#e11d48', '#fff1f2', '#fecdd3'],
+  ['CohortBlockDay',     'Mon / "Mon|Wed" to block',   '#dc2626', '#fff1f2', '#fecdd3'],
+  ['CohortBlockTime',    '"10" or "8|9|14" (hours)',   '#dc2626', '#fff1f2', '#fecdd3'],
   ['FacultyWorkingDays', 'Mon-Fri or Tue-Sat',         '#d97706', '#fffbeb', '#fde68a'],
   ['FacultyTimeStart',   '8 or 10 (faculty roster)',   '#64748b', '#f8fafc', '#e2e8f0'],
   ['FacultyTimeEnd',     '16 or 18 (faculty roster)',  '#64748b', '#f8fafc', '#e2e8f0'],
@@ -67,7 +70,7 @@ const STEP_GRADS = [
 ];
 
 const AutoSchedulePanel: React.FC<Props> = ({
-  courses, faculties, rooms, groups, terms, activeTermId, onApplySchedule,
+  courses, faculties, rooms, groups, terms, activeTermId, onApplySchedule, schedule,
 }) => {
   const courseFileRef = useRef<HTMLInputElement>(null);
   const roomFileRef   = useRef<HTMLInputElement>(null);
@@ -108,11 +111,13 @@ const AutoSchedulePanel: React.FC<Props> = ({
           campus:         (r.Campus         || '').trim(),
           cohorts:        Array.from({ length: 12 }, (_, i) => (r[`Cohort${i + 1}`] || '').trim()).filter(Boolean),
           fixedRoom:      (r.FixedRoom      || '').trim(),
-          preferredRooms: (r.PreferredRooms || '').split(',').map((s: string) => s.trim()).filter(Boolean),
-          labHours:       Math.max(1, parseInt(r.LabHours) || 2),
-          semester:       (r.Semester       || '').trim(),
-          dayForBlock:    (r['Day-For-Block'] || '').trim(),
-          timeForBlock:   (r['Time-For-Block'] || '').trim(),
+          preferredRooms:   (r.PreferredRooms   || '').split('|').map((s: string) => s.trim()).filter(Boolean),
+          labHours:         Math.max(1, parseInt(r.LabHours) || 2),
+          semester:         (r.Semester         || '').trim(),
+          facultyBlockDay:  (r.FacultyBlockDay  || '').trim(),
+          facultyBlockTime: (r.FacultyBlockTime || '').trim(),
+          cohortBlockDay:   (r.CohortBlockDay   || '').trim(),
+          cohortBlockTime:  (r.CohortBlockTime  || '').trim(),
           workingDays:    ((r.FacultyWorkingDays || '').trim() || defDays) as any,
           timeStart:      parseInt(r.FacultyTimeStart) || defStart,
           timeEnd:        parseInt(r.FacultyTimeEnd)   || defEnd,
@@ -146,6 +151,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
       assignments, roomCampusMap, courses, faculties, rooms, groups,
       activeTermId || '', getTermWeeks(activeTerm),
       (placed, total, lbl) => { setProgress(total > 0 ? Math.round((placed / total) * 100) : 0); setLabel(lbl); },
+      schedule,
     );
     setResult(res); setStage('done'); setProgress(100); setLabel('Complete');
   };
@@ -224,7 +230,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                 </button>
               </div>
               <p className="text-[9px] text-[#4338ca] leading-relaxed bg-[#eef2ff] border border-[#c7d2fe] px-2 py-1.5">
-                <strong>Course:</strong> one row per faculty-course. Use <strong>Day-For-Block</strong> + <strong>Time-For-Block</strong> (hour numbers like 10 or "8,9") on any row to keep that slot free. <strong>LabHours</strong>: enter 2 or 4. <strong>PreferredRooms</strong>: "R1,R2" in one cell.&ensp;
+                <strong>Course:</strong> one row per faculty-course. Use <strong>FacultyBlockDay/Time</strong> or <strong>CohortBlockDay/Time</strong> to keep slots free (pipe-sep hours, e.g. "8|9|14"). <strong>PreferredRooms</strong>: "R1|R2" (pipe-separated). <strong>LabHours</strong>: 2 or 4. Faculty max 2 consecutive hours (4-hr labs exempt).&ensp;
                 <strong>Room-Campus:</strong> maps room names to campus codes.
               </p>
             </div>

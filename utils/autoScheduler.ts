@@ -6,19 +6,21 @@ export interface CourseAssignment {
   courseCode: string;
   courseName: string;
   credits: number;
-  category: string;        // 'Theory' | 'Lab' | 'Tutorial' | 'Studio'
+  category: string;           // 'Theory' | 'Lab' | 'Tutorial' | 'Studio'
   campus: string;
   cohorts: string[];
   fixedRoom: string;
-  preferredRooms: string[];  // tried before campus fallback (comma-sep in CSV)
-  labHours: number;          // 2 (default) or 4
-  semester: string;          // label only — e.g. "Semester 1", "Sem 3"
-  dayForBlock: string;       // e.g. "Monday" or "Monday,Wednesday" — blocks that slot
-  timeForBlock: string;      // e.g. "10" or "8,9,14" — hour numbers to block
-  workingDays: string;       // 'Mon-Fri' | 'Tue-Sat'
-  timeStart: number;         // 8 or 10
-  timeEnd: number;           // 16 or 18
-  lunchStart: number;        // e.g. 13
+  preferredRooms: string[];   // pipe-sep in CSV (e.g. "1001|1002") to avoid Excel comma issues
+  labHours: number;           // 2 (default) or 4
+  semester: string;           // label only — e.g. "Semester 1"
+  facultyBlockDay: string;    // days to block for THIS faculty only
+  facultyBlockTime: string;   // hours to block for THIS faculty only  (e.g. "8,9,14")
+  cohortBlockDay: string;     // days to block for the cohorts in this row
+  cohortBlockTime: string;    // hours to block for the cohorts in this row
+  workingDays: string;        // 'Mon-Fri' | 'Tue-Sat'
+  timeStart: number;          // 8 or 10
+  timeEnd: number;            // 16 or 18
+  lunchStart: number;         // e.g. 13
 }
 
 export interface UnresolvedSession {
@@ -83,14 +85,47 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function parseDayForBlock(s: string): string[] {
+function parseDays(s: string): string[] {
   if (!s.trim()) return [];
   if (DAYS_MAP[s.trim()]) return DAYS_MAP[s.trim()];
   return s.split(',').map(d => d.trim()).filter(d => ALL_DAYS.includes(d));
 }
 
-function parseTimeForBlock(s: string): number[] {
+function parseHours(s: string): number[] {
   return s.split(',').map(t => parseInt(t.trim())).filter(n => !isNaN(n) && n >= 0 && n <= 23);
+}
+
+// Returns true if adding newKeys for entityId on the given day would create
+// a run of 3 or more consecutive occupied hours.
+function wouldCreateLongRun(
+  occ: Map<string, Set<string>>,
+  entityId: string,
+  day: string,
+  newKeys: string[]
+): boolean {
+  const occupied = new Set<number>();
+  const entityOcc = occ.get(entityId);
+  const prefix = `${day}~`;
+
+  if (entityOcc) {
+    for (const key of entityOcc) {
+      if (key.startsWith(prefix)) occupied.add(parseInt(key.slice(prefix.length)));
+    }
+  }
+  for (const key of newKeys) {
+    if (key.startsWith(prefix)) occupied.add(parseInt(key.slice(prefix.length)));
+  }
+
+  const sorted = Array.from(occupied).sort((a, b) => a - b);
+  let run = 1;
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === sorted[i - 1] + 1) {
+      if (++run >= 3) return true;
+    } else {
+      run = 1;
+    }
+  }
+  return false;
 }
 
 // ─── main scheduler ──────────────────────────────────────────────────────────
@@ -104,7 +139,8 @@ export async function runAutoScheduler(
   existingGroups: StudentGroup[],
   termId: string,
   weeks: number[],
-  onProgress: (placed: number, total: number, label: string) => void
+  onProgress: (placed: number, total: number, label: string) => void,
+  existingSchedule: ScheduleEntry[] = [],   // pre-existing sessions to respect
 ): Promise<SchedulerResult> {
 
   const entries: ScheduleEntry[] = [];
@@ -131,21 +167,36 @@ export async function runAutoScheduler(
   const findRoom = (name: string) =>
     existingRooms.find(r => r.name === name || (r as any)._unique_name === name);
 
-  // ── Pre-pass: apply Day-For-Block / Time-For-Block from ANY row ──────────
-  // A row with these columns filled marks those slots as occupied for the
-  // listed faculty/cohorts BEFORE any session is placed — keeping them free.
-  for (const asgn of assignments) {
-    if (!asgn.dayForBlock.trim() || !asgn.timeForBlock.trim()) continue;
-    const blockDays  = parseDayForBlock(asgn.dayForBlock);
-    const blockHours = parseTimeForBlock(asgn.timeForBlock);
-    const faculty    = findFaculty(asgn.facultyId, asgn.facultyName);
-    const groups     = asgn.cohorts.map(findGroup).filter(Boolean) as StudentGroup[];
+  // ── Pre-populate occupancy from already-saved timetable entries ────────────
+  // This lets incremental uploads respect sessions from previous runs.
+  for (const entry of existingSchedule) {
+    if (entry.termId !== termId) continue;
+    const keys = slotKeys(entry.day, entry.startTime, entry.endTime);
+    if (entry.facultyId) markBusy(facultyOcc, entry.facultyId, keys);
+    entry.groupIds?.forEach(gid => markBusy(cohortOcc, gid, keys));
+    if (entry.roomId) markBusy(roomOcc, entry.roomId, keys);
+  }
 
-    for (const day of blockDays) {
-      for (const hour of blockHours) {
-        const key = `${day}~${pad(hour)}`;
-        if (faculty) markBusy(facultyOcc, faculty.id, [key]);
-        groups.forEach(g => markBusy(cohortOcc, g.id, [key]));
+  // ── Pre-pass: apply faculty-specific and cohort-specific blocks ────────────
+  for (const asgn of assignments) {
+    const faculty = findFaculty(asgn.facultyId, asgn.facultyName);
+    const groups  = asgn.cohorts.map(findGroup).filter(Boolean) as StudentGroup[];
+
+    // Block slots for this faculty only
+    if (asgn.facultyBlockDay.trim() && asgn.facultyBlockTime.trim() && faculty) {
+      for (const day of parseDays(asgn.facultyBlockDay)) {
+        for (const hour of parseHours(asgn.facultyBlockTime)) {
+          markBusy(facultyOcc, faculty.id, [`${day}~${pad(hour)}`]);
+        }
+      }
+    }
+
+    // Block slots for the cohorts in this row only
+    if (asgn.cohortBlockDay.trim() && asgn.cohortBlockTime.trim() && groups.length > 0) {
+      for (const day of parseDays(asgn.cohortBlockDay)) {
+        for (const hour of parseHours(asgn.cohortBlockTime)) {
+          groups.forEach(g => markBusy(cohortOcc, g.id, [`${day}~${pad(hour)}`]));
+        }
       }
     }
   }
@@ -154,7 +205,7 @@ export async function runAutoScheduler(
   const courseRows = assignments.filter(a => a.courseCode.trim() && a.credits > 0);
   const totalSessions = courseRows.reduce((s, a) => s + a.credits, 0);
 
-  // Longer labs first, then by cohort count (harder to place = earlier)
+  // Longer labs first, then by cohort count (hardest to place → schedule first)
   const sorted = [...courseRows].sort((a, b) => {
     const al = a.category === 'Lab' ? 0 : 1;
     const bl = b.category === 'Lab' ? 0 : 1;
@@ -168,8 +219,9 @@ export async function runAutoScheduler(
 
   for (let ai = 0; ai < sorted.length; ai++) {
     const asgn = sorted[ai];
-    const isLab      = asgn.category === 'Lab';
-    const duration   = isLab ? (asgn.labHours || 2) : 1;
+    const isLab         = asgn.category === 'Lab';
+    const duration      = isLab ? (asgn.labHours || 2) : 1;
+    const is4HrLab      = isLab && duration >= 4;   // exempt from 3-consecutive-hour rule
     const sessionsNeeded = asgn.credits;
     const days  = DAYS_MAP[asgn.workingDays] || DAYS_MAP['Mon-Fri'];
     const slots = buildSlots(asgn.timeStart || 8, asgn.timeEnd || 16, asgn.lunchStart || 13, duration);
@@ -192,16 +244,21 @@ export async function runAutoScheduler(
 
       const keys = slotKeys(day, startTime, endTime);
 
+      // Standard clash checks
       if (faculty && !isFree(facultyOcc, faculty.id, keys)) continue;
       if (groups.some(g => !isFree(cohortOcc, g.id, keys))) continue;
 
+      // No 3 consecutive teaching hours for faculty (4-hr labs are exempt)
+      if (!is4HrLab && faculty && wouldCreateLongRun(facultyOcc, faculty.id, day, keys)) continue;
+
+      // Room selection
       let pickedRoom: Room | undefined;
 
       if (asgn.fixedRoom) {
         const r = findRoom(asgn.fixedRoom);
         if (r && isFree(roomOcc, r.id, keys)) pickedRoom = r;
       } else {
-        // Try preferred rooms first
+        // Preferred rooms tried first (pipe-separated in CSV)
         const preferredObjs = asgn.preferredRooms
           .map(name => findRoom(name))
           .filter(Boolean) as Room[];
@@ -261,8 +318,8 @@ export async function runAutoScheduler(
         sessionsNeeded,
         sessionsPlaced: placed,
         reason: placed === 0
-          ? 'No slot available — faculty / cohorts / rooms all booked'
-          : `Partial: ${placed} of ${sessionsNeeded} sessions placed`,
+          ? 'No slot available — check clashes with existing timetable or constraints'
+          : `Partial: ${placed} of ${sessionsNeeded} placed`,
       });
     }
 
@@ -282,17 +339,20 @@ export async function runAutoScheduler(
 
 // ─── CSV template strings ────────────────────────────────────────────────────
 
-// Header: 29 columns (indices 0-28)
-// 0:FacultyID 1:FacultyName 2:CourseCode 3:CourseName 4:Credits 5:Category 6:Campus
-// 7-18:Cohort1-12  19:FixedRoom 20:PreferredRooms 21:LabHours 22:Semester
-// 23:Day-For-Block 24:Time-For-Block 25:FacultyWorkingDays 26:FacultyTimeStart 27:FacultyTimeEnd 28:CohortLunchStart
+// 31 columns (indices 0-30):
+// 0:FacultyID  1:FacultyName  2:CourseCode  3:CourseName  4:Credits  5:Category  6:Campus
+// 7-18: Cohort1-12
+// 19:FixedRoom  20:PreferredRooms  21:LabHours  22:Semester
+// 23:FacultyBlockDay  24:FacultyBlockTime  25:CohortBlockDay  26:CohortBlockTime
+// 27:FacultyWorkingDays  28:FacultyTimeStart  29:FacultyTimeEnd  30:CohortLunchStart
 
 function _row(
   facultyId: string, facultyName: string,
   courseCode: string, courseName: string, credits: string, category: string, campus: string,
-  cohorts: string[],         // up to 12 — padded to exactly 12 slots
+  cohorts: string[],
   fixedRoom: string, preferredRooms: string, labHours: string, semester: string,
-  dayForBlock: string, timeForBlock: string,
+  facultyBlockDay: string, facultyBlockTime: string,
+  cohortBlockDay: string, cohortBlockTime: string,
   workingDays: string, timeStart: string, timeEnd: string, lunchStart: string,
 ): string {
   const c = [...cohorts, ...Array(12).fill('')].slice(0, 12);
@@ -300,39 +360,58 @@ function _row(
     facultyId, facultyName, courseCode, courseName, credits, category, campus,
     ...c,
     fixedRoom, preferredRooms, labHours, semester,
-    dayForBlock, timeForBlock,
+    facultyBlockDay, facultyBlockTime,
+    cohortBlockDay, cohortBlockTime,
     workingDays, timeStart, timeEnd, lunchStart,
   ];
-  // Wrap any value that contains a comma in double-quotes (valid CSV)
+  // Wrap values containing commas in double-quotes (standard CSV escaping)
   return vals.map(v => v.includes(',') ? `"${v}"` : v).join(',');
 }
 
 const _HDR =
   'FacultyID,FacultyName,CourseCode,CourseName,Credits,Category,Campus,' +
   'Cohort1,Cohort2,Cohort3,Cohort4,Cohort5,Cohort6,Cohort7,Cohort8,Cohort9,Cohort10,Cohort11,Cohort12,' +
-  'FixedRoom,PreferredRooms,LabHours,Semester,Day-For-Block,Time-For-Block,' +
+  'FixedRoom,PreferredRooms,LabHours,Semester,' +
+  'FacultyBlockDay,FacultyBlockTime,CohortBlockDay,CohortBlockTime,' +
   'FacultyWorkingDays,FacultyTimeStart,FacultyTimeEnd,CohortLunchStart';
 
 export const COURSE_TEMPLATE_CSV = [
   _HDR,
-  // Theory — 3 sessions/week, no fixed/preferred room
+  // Theory — 3 sessions/week
   _row('600001','John Smith','CS301','Data Structures','3','Theory','K1',
-    ['CS-Y3-A','CS-Y3-B'], '','','','1', '','', 'Mon-Fri','8','16','13'),
+    ['CS-Y3-A','CS-Y3-B'], '','','','1',
+    '','', '','',
+    'Mon-Fri','8','16','13'),
   // Lab — 2-hour, fixed room
   _row('600002','Jane Doe','CS401','Lab Practical','2','Lab','K1',
-    ['CS-Y4-A'], 'IT201','','2','2', '','', 'Mon-Fri','8','16','13'),
-  // Lab — 4-hour (Health Sciences), multiple preferred rooms (comma-sep in one cell)
+    ['CS-Y4-A'], 'IT201','','2','2',
+    '','', '','',
+    'Mon-Fri','8','16','13'),
+  // Lab — 4-hour, multiple preferred rooms (use | not comma to avoid Excel issues)
   _row('600005','Dr. Patel','HS501','Clinical Lab','1','Lab','AB',
-    ['HS-Y3-A'], '','AB-Lab1,AB-Lab2','4','3', '','', 'Mon-Fri','8','16','13'),
+    ['HS-Y3-A'], '','AB-Lab1|AB-Lab2','4','3',
+    '','', '','',
+    'Mon-Fri','8','16','13'),
   // Studio
   _row('600003','Alice Brown','DES501','Design Studio','2','Studio','AB',
-    ['DES-Y5-A'], '','','','2', '','', 'Mon-Fri','10','18','13'),
-  // Block-only — no course: blocks Monday hours 10 and 11 for this faculty+cohort
+    ['DES-Y5-A'], '','','','2',
+    '','', '','',
+    'Mon-Fri','10','18','13'),
+  // Faculty block — faculty 600001 is unavailable Mon-Fri at 9:00
   _row('600001','John Smith','','','0','','',
-    ['CS-Y3-A'], '','','','1', 'Monday','10,11', 'Mon-Fri','8','16','13'),
-  // Block-only — blocks entire Mon-Fri at hour 9 (e.g. morning assembly)
+    [], '', '','','1',
+    'Mon-Fri','9', '','',
+    'Mon-Fri','8','16','13'),
+  // Cohort block — CS-Y3-A has assembly every Monday at 10:00 and 11:00
+  _row('600001','John Smith','','','0','','',
+    ['CS-Y3-A'], '','','','1',
+    '','', 'Monday','10,11',
+    'Mon-Fri','8','16','13'),
+  // Combined — block faculty on Friday afternoon AND cohort on Wednesday morning
   _row('600002','Jane Doe','','','0','','',
-    ['CS-Y4-A'], '','','','2', 'Mon-Fri','9', 'Mon-Fri','8','16','13'),
+    ['CS-Y4-A'], '','','','2',
+    'Friday','14,15', 'Wednesday','8,9',
+    'Mon-Fri','8','16','13'),
 ].join('\n');
 
 export const ROOM_CAMPUS_TEMPLATE_CSV = [
