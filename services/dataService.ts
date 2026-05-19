@@ -123,13 +123,13 @@ export class DataService {
 
     console.log(`[DB] ${tableName}: ${successCount}/${rows.length} rows synced (${failedBatches.length} batches failed)`);
 
-    if (failedBatches.length > 0 && successCount === 0) {
-      const msg = firstError 
+    if (failedBatches.length > 0) {
+      const msg = firstError
         ? `${firstError.message || 'Unknown error'} (Code: ${firstError.code || 'N/A'}) \nDetails: ${firstError.details || 'None'}`
         : 'Supabase network overloaded or connection reset';
-      return `All uploads failed for ${tableName}. Supabase says: \n\n${msg}`;
+      return `${failedBatches.length}/${totalBatches} batch(es) failed for ${tableName} (${successCount}/${rows.length} rows saved). Supabase says: \n\n${msg}`;
     }
-    
+
     return null;
   }
 
