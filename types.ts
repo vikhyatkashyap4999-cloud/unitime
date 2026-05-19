@@ -72,8 +72,8 @@ export interface StudentGroup {
 export interface ScheduleEntry {
   id: string;
   termId: string;
-  courseId: string;
-  facultyId: string;
+  courseId: string | null;
+  facultyId: string | null;
   roomId: string | null;
   groupIds: string[];
   day: DayOfWeek;

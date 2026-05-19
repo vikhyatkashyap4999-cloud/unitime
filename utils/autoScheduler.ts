@@ -238,12 +238,16 @@ export async function runAutoScheduler(
   const findCourse  = (code: string) =>
     existingCourses.find(c => c.code === code || (c as any)._unique_name === code || c.name === code);
 
-  const findFaculty = (id: string, name: string) =>
-    existingFaculties.find(f =>
+  const normName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+  const findFaculty = (id: string, name: string) => {
+    const nName = normName(name);
+    return existingFaculties.find(f =>
       f.facultyId === id || f.id === id ||
       (f as any)._Faculty_ID === id ||
-      f.name === name || (f as any)._Faculty_name === name
+      normName(f.name) === nName ||
+      (f as any)._Faculty_name && normName((f as any)._Faculty_name) === nName
     );
+  };
 
   const findGroup = (name: string) =>
     existingGroups.find(g => g.name === name || (g as any)._unique_name === name);
@@ -395,8 +399,8 @@ export async function runAutoScheduler(
       entries.push({
         id:           `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         termId,
-        courseId:     course?.id   || asgn.courseCode,
-        facultyId:    faculty?.id  || asgn.facultyId,
+        courseId:     course?.id   ?? null,
+        facultyId:    faculty?.id  ?? null,
         roomId:       pickedRoom?.id ?? null,
         groupIds,
         day,
