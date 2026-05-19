@@ -109,6 +109,10 @@ const App: React.FC = () => {
   // (realtime callbacks are set up once and would otherwise close over the mount-time value).
   const activeTermIdRef = useRef<string | undefined>(undefined);
 
+  // Tracks which termId data was last fully loaded for — used to detect real term switches
+  // and trigger a full data reload (courses, faculties, rooms, groups, schedule).
+  const loadedTermIdRef = useRef<string | undefined>(undefined);
+
   // ✅ FIX: Mirror of `schedule` state as a ref.
   // Handlers like handleSaveSession close over the React state value at render time.
   // When two saves fire before React re-renders, the second sees the old `schedule = []`
@@ -154,6 +158,7 @@ const App: React.FC = () => {
 
         // Keep the ref current so realtime callbacks always use the correct id.
         activeTermIdRef.current = realActiveTermId;
+        loadedTermIdRef.current = realActiveTermId;
 
         // Step 3: Load all term-scoped entities with the correct termId.
         const [c, f, r, g, s] = await Promise.all([
@@ -250,9 +255,39 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Keep activeTermIdRef current whenever the viewed/active term changes.
+  // Keep activeTermIdRef current AND reload all term-scoped data when the active term changes.
   useEffect(() => {
-    activeTermIdRef.current = effectiveActiveTerm?.id;
+    const termId = effectiveActiveTerm?.id;
+    activeTermIdRef.current = termId;
+
+    // Skip if this is the same term that was already loaded (initial load or no real change).
+    if (!termId || termId === loadedTermIdRef.current) return;
+    loadedTermIdRef.current = termId;
+
+    const reloadForTerm = async () => {
+      setIsSyncing(true);
+      isSyncingRef.current = true;
+      try {
+        const [c, f, r, g, s] = await Promise.all([
+          DataService.loadEntity<Course>('courses', 'unitime_courses', [], termId),
+          DataService.loadEntity<Faculty>('faculties', 'unitime_faculties', [], termId),
+          DataService.loadEntity<Room>('rooms', 'unitime_rooms', [], termId),
+          DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], termId),
+          DataService.loadAllEntries(termId),
+        ]);
+        setCourses(c);
+        setFaculties(f);
+        setRooms(r);
+        setGroups(g);
+        setScheduleAndRef(s);
+      } catch (err) {
+        console.error('[Term Switch] Failed to reload data:', err);
+      } finally {
+        setIsSyncing(false);
+        isSyncingRef.current = false;
+      }
+    };
+    reloadForTerm();
   }, [effectiveActiveTerm?.id]);
 
   // Canvas cursor-glow: translate a pre-rendered radial gradient div to follow the cursor.
