@@ -1,6 +1,6 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import Papa from 'papaparse';
-import { Download, Upload, Zap, CheckCircle, AlertTriangle, FileText, X, ChevronDown, ChevronUp, MapPin, Clock, Coffee, Calendar } from 'lucide-react';
+import { Download, Upload, Zap, CheckCircle, AlertTriangle, FileText, X, ChevronDown, ChevronUp, MapPin, Clock, Coffee, Calendar, GraduationCap } from 'lucide-react';
 import type { Course, Faculty, Room, StudentGroup, ScheduleEntry, Term, UserAccount } from '../types';
 import {
   runAutoScheduler,
@@ -43,6 +43,7 @@ function getTermWeeks(term: Term | undefined): number[] {
 const COLS: [string, string, string, string, string][] = [
   ['FacultyID',          'e.g. 600001',               '#4338ca', '#eef2ff', '#c7d2fe'],
   ['FacultyName',        'e.g. John Smith',            '#4338ca', '#eef2ff', '#c7d2fe'],
+  ['School',             'School of Engineering…',     '#0891b2', '#ecfeff', '#a5f3fc'],
   ['CourseCode',         'e.g. CS301',                 '#7c3aed', '#f5f3ff', '#ddd6fe'],
   ['CourseName',         'e.g. Data Structures',       '#7c3aed', '#f5f3ff', '#ddd6fe'],
   ['Credits',            '3 = 3 sessions/week',        '#059669', '#ecfdf5', '#a7f3d0'],
@@ -71,6 +72,46 @@ const STEP_GRADS = [
   'linear-gradient(135deg, #d97706, #f59e0b)',
 ];
 
+function balanceWorkingDays(
+  assignments: CourseAssignment[],
+  fallback: 'Mon-Fri' | 'Tue-Sat',
+): CourseAssignment[] {
+  // Collect unique faculties per school with their explicit workingDays
+  const schoolMap = new Map<string, Map<string, string>>(); // school -> facultyId -> days | ''
+  for (const a of assignments) {
+    if (!a.facultyId) continue;
+    const school = a.school.trim() || '__default__';
+    if (!schoolMap.has(school)) schoolMap.set(school, new Map());
+    const fac = schoolMap.get(school)!;
+    const existing = fac.get(a.facultyId);
+    const val = (a.workingDays as string).trim();
+    // Explicit value wins over blank; first explicit occurrence wins
+    if (existing === undefined || (existing === '' && val !== '')) fac.set(a.facultyId, val);
+  }
+
+  // Per school, assign blanks to reach 50/50
+  const resolved = new Map<string, 'Mon-Fri' | 'Tue-Sat'>();
+  for (const facMap of schoolMap.values()) {
+    const unset: string[] = [];
+    let mf = 0, ts = 0;
+    for (const [id, days] of facMap) {
+      if (days === 'Mon-Fri') { resolved.set(id, 'Mon-Fri'); mf++; }
+      else if (days === 'Tue-Sat') { resolved.set(id, 'Tue-Sat'); ts++; }
+      else unset.push(id);
+    }
+    for (const id of unset) {
+      const assign: 'Mon-Fri' | 'Tue-Sat' = mf <= ts ? 'Mon-Fri' : 'Tue-Sat';
+      resolved.set(id, assign);
+      if (assign === 'Mon-Fri') mf++; else ts++;
+    }
+  }
+
+  return assignments.map(a => ({
+    ...a,
+    workingDays: resolved.get(a.facultyId) ?? fallback,
+  }));
+}
+
 const AutoSchedulePanel: React.FC<Props> = ({
   courses, faculties, rooms, groups, terms, activeTermId, onApplySchedule, schedule,
 }) => {
@@ -96,6 +137,26 @@ const AutoSchedulePanel: React.FC<Props> = ({
 
   const activeTerm = terms.find(t => t.id === activeTermId);
 
+  const schoolReport = useMemo(() => {
+    if (!assignments.length) return [];
+    const balanced = balanceWorkingDays(assignments, defDays);
+    const schoolMap = new Map<string, Map<string, 'Mon-Fri' | 'Tue-Sat'>>();
+    for (const a of balanced) {
+      if (!a.facultyId) continue;
+      const school = a.school.trim() || 'Unspecified';
+      if (!schoolMap.has(school)) schoolMap.set(school, new Map());
+      schoolMap.get(school)!.set(a.facultyId, a.workingDays as any);
+    }
+    return Array.from(schoolMap.entries())
+      .map(([school, fac]) => {
+        const total = fac.size;
+        const mf = Array.from(fac.values()).filter(d => d === 'Mon-Fri').length;
+        const ts = total - mf;
+        return { school, total, mf, ts, mfPct: total ? Math.round((mf / total) * 100) : 0, tsPct: total ? Math.round((ts / total) * 100) : 0 };
+      })
+      .sort((a, b) => a.school.localeCompare(b.school));
+  }, [assignments, defDays]);
+
   const parseCourseFile = useCallback((file: File) => {
     setParseError('');
     Papa.parse(file, {
@@ -106,6 +167,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
         const parsed: CourseAssignment[] = rows.map(r => ({
           facultyId:      (r.FacultyID      || '').trim(),
           facultyName:    (r.FacultyName    || '').trim(),
+          school:         (r.School         || '').trim(),
           courseCode:     (r.CourseCode     || '').trim(),
           courseName:     (r.CourseName     || '').trim(),
           credits:        Math.max(0, parseInt(r.Credits) || 0),
@@ -122,7 +184,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
           facultyBlockTime: (r.FacultyBlockTime  || '').trim(),
           cohortBlockDay:   (r.CohortBlockDay    || '').trim(),
           cohortBlockTime:  (r.CohortBlockTime   || '').trim(),
-          workingDays:    ((r.FacultyWorkingDays || '').trim() || defDays) as any,
+          workingDays:    (r.FacultyWorkingDays || '').trim() as any,
           timeStart:      parseInt(r.FacultyTimeStart) || defStart,
           timeEnd:        parseInt(r.FacultyTimeEnd)   || defEnd,
           lunchStart:     parseInt(r.CohortLunchStart) || defLunch,
@@ -132,7 +194,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
       },
       error: (e) => setParseError(e.message),
     });
-  }, [defDays, defStart, defEnd, defLunch]);
+  }, [defStart, defEnd, defLunch]);
 
   const parseRoomFile = useCallback((file: File) => {
     Papa.parse(file, {
@@ -151,8 +213,9 @@ const AutoSchedulePanel: React.FC<Props> = ({
   const handleGenerate = async () => {
     if (!assignments.length) return;
     setStage('running'); setProgress(0); setLabel('Starting…'); setResult(null);
+    const balanced = balanceWorkingDays(assignments, defDays);
     const res = await runAutoScheduler(
-      assignments, roomCampusMap, courses, faculties, rooms, groups,
+      balanced, roomCampusMap, courses, faculties, rooms, groups,
       activeTermId || '', getTermWeeks(activeTerm),
       (placed, total, lbl) => { setProgress(total > 0 ? Math.round((placed / total) * 100) : 0); setLabel(lbl); },
       schedule,
@@ -234,8 +297,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                 </button>
               </div>
               <p className="text-[9px] text-[#4338ca] leading-relaxed bg-[#eef2ff] border border-[#c7d2fe] px-2 py-1.5">
-                <strong>Course:</strong> one row per faculty-course. Use <strong>FacultyBlockDay/Time</strong> or <strong>CohortBlockDay/Time</strong> to keep slots free (pipe-sep hours, e.g. "8|9|14"). <strong>PreferredRooms</strong>: "R1|R2" (pipe-separated). <strong>LabHours</strong>: 2 or 4. Faculty max 2 consecutive hours (4-hr labs exempt).&ensp;
-                <strong>Room-Campus:</strong> maps room names to campus codes.
+                <strong>School</strong> column groups faculties for automatic 50/50 Mon-Fri/Tue-Sat roster balancing per school (leave <strong>FacultyWorkingDays</strong> blank to auto-assign). Explicit "Mon-Fri"/"Tue-Sat" is always respected. <strong>PreferredRooms</strong>: "R1|R2" pipe-separated. Block columns accept pipe-sep days/hours. Faculty max 2 consecutive hours (4-hr labs exempt).
               </p>
             </div>
           </div>
@@ -313,6 +375,51 @@ const AutoSchedulePanel: React.FC<Props> = ({
               )}
             </div>
           </div>
+
+          {/* School Roster Distribution — visible after CSV upload */}
+          {schoolReport.length > 0 && (
+            <div className="bg-white border border-[#e2e8f0] shadow-sm shrink-0">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-[#f1f5f9]" style={{ background: 'linear-gradient(135deg, #ecfeff, #cffafe)' }}>
+                <GraduationCap className="w-3.5 h-3.5 text-[#0891b2]" />
+                <span className="text-[11px] font-black text-[#0f172a] uppercase tracking-wide">School Roster Distribution</span>
+                <span className="text-[9px] text-[#0891b2] ml-1">auto-balanced preview</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[9px]">
+                  <thead>
+                    <tr style={{ background: 'linear-gradient(135deg, #ecfeff, #cffafe)' }}>
+                      {['School', 'Mon–Fri', '%', 'Tue–Sat', '%', 'Total'].map(h => (
+                        <th key={h} className="px-2 py-1.5 text-left font-black text-[#0e7490] uppercase tracking-wider border-b border-[#a5f3fc] whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#ecfeff]">
+                    {schoolReport.map(row => (
+                      <tr key={row.school} className="hover:bg-[#ecfeff] transition-colors">
+                        <td className="px-2 py-1.5 font-bold text-[#0f172a] max-w-[120px] truncate">{row.school}</td>
+                        <td className="px-2 py-1.5 font-black text-[#059669]">{row.mf}</td>
+                        <td className="px-2 py-1.5">
+                          <span className={`px-1 py-0.5 text-[8px] font-black ${row.mfPct >= 45 && row.mfPct <= 55 ? 'bg-[#d1fae5] text-[#059669]' : 'bg-[#fef3c7] text-[#d97706]'}`}>
+                            {row.mfPct}%
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 font-black text-[#7c3aed]">{row.ts}</td>
+                        <td className="px-2 py-1.5">
+                          <span className={`px-1 py-0.5 text-[8px] font-black ${row.tsPct >= 45 && row.tsPct <= 55 ? 'bg-[#d1fae5] text-[#059669]' : 'bg-[#fef3c7] text-[#d97706]'}`}>
+                            {row.tsPct}%
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 text-[#475569]">{row.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[8px] text-[#64748b] px-3 py-1.5 border-t border-[#ecfeff]">
+                Green % = within 45–55% target. Faculty with blank FacultyWorkingDays are auto-assigned to balance each school.
+              </p>
+            </div>
+          )}
 
           {/* Step 3 */}
           <div className="bg-white border border-[#e2e8f0] shadow-sm shrink-0">

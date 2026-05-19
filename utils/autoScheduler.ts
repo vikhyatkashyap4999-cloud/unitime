@@ -3,6 +3,7 @@ import type { Course, Faculty, Room, StudentGroup, ScheduleEntry } from '../type
 export interface CourseAssignment {
   facultyId: string;
   facultyName: string;
+  school: string;           // e.g. "School of Engineering" — used for 50/50 roster balancing
   courseCode: string;
   courseName: string;
   credits: number;
@@ -352,16 +353,16 @@ export async function runAutoScheduler(
 
 // ─── CSV template strings ────────────────────────────────────────────────────
 
-// 33 columns (indices 0-32):
-// 0:FacultyID  1:FacultyName  2:CourseCode  3:CourseName  4:Credits  5:Category  6:Campus
-// 7-18: Cohort1-12
-// 19:FixedRoom  20:PreferredRooms  21:LabHours  22:Semester
-// 23:Day-For-Block  24:Time-For-Block  (blocks both faculty AND cohort)
-// 25:FacultyBlockDay  26:FacultyBlockTime  27:CohortBlockDay  28:CohortBlockTime
-// 29:FacultyWorkingDays  30:FacultyTimeStart  31:FacultyTimeEnd  32:CohortLunchStart
+// 34 columns (indices 0-33):
+// 0:FacultyID  1:FacultyName  2:School  3:CourseCode  4:CourseName  5:Credits  6:Category  7:Campus
+// 8-19: Cohort1-12
+// 20:FixedRoom  21:PreferredRooms  22:LabHours  23:Semester
+// 24:Day-For-Block  25:Time-For-Block  (blocks both faculty AND cohort)
+// 26:FacultyBlockDay  27:FacultyBlockTime  28:CohortBlockDay  29:CohortBlockTime
+// 30:FacultyWorkingDays  31:FacultyTimeStart  32:FacultyTimeEnd  33:CohortLunchStart
 
 function _row(
-  facultyId: string, facultyName: string,
+  facultyId: string, facultyName: string, school: string,
   courseCode: string, courseName: string, credits: string, category: string, campus: string,
   cohorts: string[],
   fixedRoom: string, preferredRooms: string, labHours: string, semester: string,
@@ -372,7 +373,7 @@ function _row(
 ): string {
   const c = [...cohorts, ...Array(12).fill('')].slice(0, 12);
   const vals = [
-    facultyId, facultyName, courseCode, courseName, credits, category, campus,
+    facultyId, facultyName, school, courseCode, courseName, credits, category, campus,
     ...c,
     fixedRoom, preferredRooms, labHours, semester,
     dayForBlock, timeForBlock,
@@ -385,7 +386,7 @@ function _row(
 }
 
 const _HDR =
-  'FacultyID,FacultyName,CourseCode,CourseName,Credits,Category,Campus,' +
+  'FacultyID,FacultyName,School,CourseCode,CourseName,Credits,Category,Campus,' +
   'Cohort1,Cohort2,Cohort3,Cohort4,Cohort5,Cohort6,Cohort7,Cohort8,Cohort9,Cohort10,Cohort11,Cohort12,' +
   'FixedRoom,PreferredRooms,LabHours,Semester,' +
   'Day-For-Block,Time-For-Block,' +
@@ -395,53 +396,53 @@ const _HDR =
 export const COURSE_TEMPLATE_CSV = [
   _HDR,
   // Theory — 3 sessions/week
-  _row('600001','John Smith','CS301','Data Structures','3','Theory','K1',
+  _row('600001','John Smith','School of Engineering','CS301','Data Structures','3','Theory','K1',
     ['CS-Y3-A','CS-Y3-B'], '','','','1',
     '','', '','', '','',
     'Mon-Fri','8','16','13'),
   // Lab — 2-hour, fixed room
-  _row('600002','Jane Doe','CS401','Lab Practical','2','Lab','K1',
+  _row('600002','Jane Doe','School of Engineering','CS401','Lab Practical','2','Lab','K1',
     ['CS-Y4-A'], 'IT201','','2','2',
     '','', '','', '','',
     'Mon-Fri','8','16','13'),
   // Lab — 4-hour, multiple preferred rooms (use | not comma to avoid Excel issues)
-  _row('600005','Dr. Patel','HS501','Clinical Lab','1','Lab','AB',
+  _row('600005','Dr. Patel','School of Health Sciences','HS501','Clinical Lab','1','Lab','AB',
     ['HS-Y3-A'], '','AB-Lab1|AB-Lab2','4','3',
     '','', '','', '','',
     'Mon-Fri','8','16','13'),
-  // Studio
-  _row('600003','Alice Brown','DES501','Design Studio','2','Studio','AB',
+  // Studio — leave School blank → auto-balanced
+  _row('600003','Alice Brown','School of Design','DES501','Design Studio','2','Studio','AB',
     ['DES-Y5-A'], '','','','2',
     '','', '','', '','',
-    'Mon-Fri','10','18','13'),
+    '','10','18','13'),
   // Day-For-Block — blocks both faculty AND cohort CS-Y3-A on Tuesday at 10,11
-  _row('600001','John Smith','','','0','','',
+  _row('600001','John Smith','School of Engineering','','','0','','',
     ['CS-Y3-A'], '','','','1',
     'Tuesday','10,11', '','', '','',
-    'Mon-Fri','8','16','13'),
+    '','8','16','13'),
   // Faculty block — faculty 600001 is unavailable Monday at 9
-  _row('600001','John Smith','','','0','','',
+  _row('600001','John Smith','School of Engineering','','','0','','',
     [], '', '','','1',
     '','', 'Monday','9', '','',
-    'Mon-Fri','8','16','13'),
+    '','8','16','13'),
   // Cohort block — CS-Y3-A has assembly every Monday at 10:00 and 11:00
-  _row('600001','John Smith','','','0','','',
+  _row('600001','John Smith','School of Engineering','','','0','','',
     ['CS-Y3-A'], '','','','1',
     '','', '','', 'Monday','10,11',
-    'Mon-Fri','8','16','13'),
+    '','8','16','13'),
   // Combined separate — block faculty Friday pm AND cohort Wednesday morning
-  _row('600002','Jane Doe','','','0','','',
+  _row('600002','Jane Doe','School of Engineering','','','0','','',
     ['CS-Y4-A'], '','','','2',
     '','', 'Friday','14,15', 'Wednesday','8,9',
-    'Mon-Fri','8','16','13'),
+    '','8','16','13'),
 ].join('\n');
 
 export const ROOM_CAMPUS_TEMPLATE_CSV = [
-  'RoomName,Campus',
-  'K1007,K1',
-  'K2001,K2',
-  'AB-Lab1,AB',
-  'AB-Lab2,AB',
-  'IT201,K1',
-  'RD001,RD',
+  'RoomName,Campus,School',
+  'K1007,K1,School of Engineering',
+  'K2001,K2,School of Engineering',
+  'AB-Lab1,AB,School of Health Sciences',
+  'AB-Lab2,AB,School of Health Sciences',
+  'IT201,K1,School of Engineering',
+  'RD001,RD,School of Management',
 ].join('\n');
