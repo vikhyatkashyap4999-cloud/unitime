@@ -15,6 +15,7 @@ import SupabaseSetup from './components/SupabaseSetup';
 import ReportsPanel from './components/ReportsPanel';
 import AutoSchedulePanel from './components/AutoSchedulePanel';
 import RoomAvailabilityTool from './components/RoomAvailabilityTool';
+import ChatbotPanel from './components/ChatbotPanel';
 import {
   Term, Course, Faculty, Room, StudentGroup, ScheduleEntry, Clash, Role, ViewType, UserAccount, DayOfWeek
 } from './types';
@@ -1185,6 +1186,15 @@ const App: React.FC = () => {
           // Also open / focus a timetable panel for that resource
           addPanel(resourceType, resourceId);
         }}
+      />
+      <ChatbotPanel
+        courses={courses}
+        faculties={faculties}
+        rooms={rooms}
+        groups={groups}
+        schedule={schedule}
+        clashes={clashes}
+        activeTerm={effectiveActiveTerm}
       />
     </div>
   );
