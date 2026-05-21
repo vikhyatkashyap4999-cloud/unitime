@@ -29,6 +29,10 @@ interface Props {
 }
 
 const DAILY_REQ_LIMIT = 1500;
+const MIN_W = 340;
+const MIN_H = 380;
+const DEFAULT_W = 480;
+const DEFAULT_H = 640;
 
 const SUGGESTIONS = [
   'How many sessions are scheduled this term?',
@@ -126,9 +130,6 @@ Be concise, professional, and helpful. Use markdown formatting for clarity.`;
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-const WINDOW_W = 480;
-const WINDOW_H = 640;
-
 const ChatbotPanel: React.FC<Props> = ({
   isOpen, onClose, courses, faculties, rooms, groups, schedule, clashes, activeTerm,
 }) => {
@@ -139,10 +140,22 @@ const ChatbotPanel: React.FC<Props> = ({
   const [usage, setUsage]             = useState<SessionUsage>({ totalTokens: 0, requestCount: 0 });
   const [error, setError]             = useState('');
 
-  // Drag state
-  const [pos, setPos]       = useState({ x: window.innerWidth - WINDOW_W - 12, y: 42 });
-  const dragging            = useRef(false);
-  const dragOffset          = useRef({ x: 0, y: 0 });
+  // Position and size state
+  const [pos, setPos]   = useState({ x: window.innerWidth - DEFAULT_W - 12, y: 42 });
+  const [size, setSize] = useState({ w: DEFAULT_W, h: DEFAULT_H });
+
+  // Refs to track current values inside effects
+  const sizeRef = useRef(size);
+  useEffect(() => { sizeRef.current = size; }, [size]);
+
+  // Drag refs
+  const dragging    = useRef(false);
+  const dragOffset  = useRef({ x: 0, y: 0 });
+
+  // Resize refs
+  const resizing     = useRef(false);
+  const resizeEdge   = useRef('');
+  const resizeStart  = useRef({ mouseX: 0, mouseY: 0, w: 0, h: 0, px: 0, py: 0 });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef       = useRef<HTMLTextAreaElement>(null);
@@ -162,28 +175,54 @@ const ChatbotPanel: React.FC<Props> = ({
     if (isOpen && !isMinimized) setTimeout(() => inputRef.current?.focus(), 150);
   }, [isOpen, isMinimized]);
 
-  // Reset position to top-right when re-opened
+  // Reset position and size when re-opened
   useEffect(() => {
-    if (isOpen) setPos({ x: window.innerWidth - WINDOW_W - 12, y: 42 });
+    if (isOpen) {
+      setSize({ w: DEFAULT_W, h: DEFAULT_H });
+      setPos({ x: window.innerWidth - DEFAULT_W - 12, y: 42 });
+    }
   }, [isOpen]);
 
-  // ── Drag handlers ──────────────────────────────────────────────────────────
-  const onMouseDown = (e: React.MouseEvent) => {
-    // Only drag on the header bar itself, not buttons inside it
+  // ── Drag handler ──────────────────────────────────────────────────────────
+  const onDragMouseDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
     dragging.current = true;
     dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
     e.preventDefault();
   };
 
+  // ── Resize handler ────────────────────────────────────────────────────────
+  const onResizeMouseDown = (edge: string) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    resizing.current = true;
+    resizeEdge.current = edge;
+    resizeStart.current = { mouseX: e.clientX, mouseY: e.clientY, w: size.w, h: size.h, px: pos.x, py: pos.y };
+  };
+
+  // ── Global mouse move / up ────────────────────────────────────────────────
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
-      if (!dragging.current) return;
-      const newX = Math.max(0, Math.min(window.innerWidth  - WINDOW_W, e.clientX - dragOffset.current.x));
-      const newY = Math.max(0, Math.min(window.innerHeight - 60,       e.clientY - dragOffset.current.y));
-      setPos({ x: newX, y: newY });
+      if (dragging.current) {
+        const w = sizeRef.current.w;
+        const newX = Math.max(0, Math.min(window.innerWidth - w, e.clientX - dragOffset.current.x));
+        const newY = Math.max(0, Math.min(window.innerHeight - 60, e.clientY - dragOffset.current.y));
+        setPos({ x: newX, y: newY });
+      } else if (resizing.current) {
+        const { mouseX, mouseY, w, h, px, py } = resizeStart.current;
+        const dx = e.clientX - mouseX;
+        const dy = e.clientY - mouseY;
+        const edge = resizeEdge.current;
+        let newW = w, newH = h, newX = px, newY = py;
+        if (edge.includes('e')) newW = Math.max(MIN_W, w + dx);
+        if (edge.includes('s')) newH = Math.max(MIN_H, h + dy);
+        if (edge.includes('w')) { newW = Math.max(MIN_W, w - dx); newX = px + (w - newW); }
+        if (edge.includes('n')) { newH = Math.max(MIN_H, h - dy); newY = py + (h - newH); }
+        setSize({ w: newW, h: newH });
+        setPos({ x: newX, y: newY });
+      }
     };
-    const onUp = () => { dragging.current = false; };
+    const onUp = () => { dragging.current = false; resizing.current = false; };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
@@ -207,7 +246,7 @@ const ChatbotPanel: React.FC<Props> = ({
       }));
 
       const response = await aiRef.current.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-2.0-flash',
         contents: history,
         config: {
           systemInstruction: buildSystemPrompt(courses, faculties, rooms, groups, schedule, clashes, activeTerm),
@@ -240,10 +279,9 @@ const ChatbotPanel: React.FC<Props> = ({
 
   if (!isOpen || !apiKey) return null;
 
-  const reqPct             = Math.min(100, (usage.requestCount / DAILY_REQ_LIMIT) * 100);
-  const remaining          = Math.max(0, DAILY_REQ_LIMIT - usage.requestCount);
-  const reqColor           = reqPct > 80 ? '#dc2626' : reqPct > 50 ? '#d97706' : '#16a34a';
-  const termScheduleCount  = activeTerm ? schedule.filter(s => s.termId === activeTerm.id).length : schedule.length;
+  const reqPct    = Math.min(100, (usage.requestCount / DAILY_REQ_LIMIT) * 100);
+  const remaining = Math.max(0, DAILY_REQ_LIMIT - usage.requestCount);
+  const reqColor  = reqPct > 80 ? '#dc2626' : reqPct > 50 ? '#d97706' : '#16a34a';
 
   return (
     <div
@@ -251,21 +289,44 @@ const ChatbotPanel: React.FC<Props> = ({
       style={{
         left: pos.x,
         top: pos.y,
-        width: WINDOW_W,
-        height: isMinimized ? 'auto' : WINDOW_H,
+        width: size.w,
+        height: isMinimized ? 'auto' : size.h,
         background: '#ffffff',
         border: '1px solid #94a3b8',
         boxShadow: '0 12px 40px rgba(0,0,0,0.22), 0 4px 12px rgba(0,0,0,0.12)',
         userSelect: 'none',
       }}
     >
+      {/* ── Resize handles (edges + corners) ── */}
+      {!isMinimized && (
+        <>
+          <div onMouseDown={onResizeMouseDown('e')}  style={{ position: 'absolute', right: 0,  top: 10, bottom: 10, width: 5, cursor: 'ew-resize', zIndex: 20 }} />
+          <div onMouseDown={onResizeMouseDown('w')}  style={{ position: 'absolute', left: 0,   top: 10, bottom: 10, width: 5, cursor: 'ew-resize', zIndex: 20 }} />
+          <div onMouseDown={onResizeMouseDown('s')}  style={{ position: 'absolute', bottom: 0, left: 10, right: 10, height: 5, cursor: 'ns-resize', zIndex: 20 }} />
+          <div onMouseDown={onResizeMouseDown('se')} style={{ position: 'absolute', bottom: 0, right: 0, width: 14, height: 14, cursor: 'se-resize', zIndex: 21 }} />
+          <div onMouseDown={onResizeMouseDown('sw')} style={{ position: 'absolute', bottom: 0, left: 0,  width: 14, height: 14, cursor: 'sw-resize', zIndex: 21 }} />
+          <div onMouseDown={onResizeMouseDown('ne')} style={{ position: 'absolute', top: 0,    right: 0, width: 14, height: 14, cursor: 'ne-resize', zIndex: 21 }} />
+          <div onMouseDown={onResizeMouseDown('nw')} style={{ position: 'absolute', top: 0,    left: 0,  width: 14, height: 14, cursor: 'nw-resize', zIndex: 21 }} />
+          {/* Visual grip dots at bottom-right */}
+          <div style={{ position: 'absolute', bottom: 3, right: 3, pointerEvents: 'none', zIndex: 22, display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
+            {[0,1,2].map(r => (
+              <div key={r} style={{ display: 'flex', gap: 2 }}>
+                {Array.from({ length: 3 - r }).map((_, c) => (
+                  <div key={c} style={{ width: 3, height: 3, borderRadius: '50%', background: '#cbd5e1' }} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       {/* ── Header (drag handle) ── */}
       <div
-        onMouseDown={onMouseDown}
+        onMouseDown={onDragMouseDown}
         className="shrink-0 flex items-center gap-3 px-4 py-3 border-b border-[#0a2d6e]"
         style={{
           background: 'linear-gradient(180deg, #1e6ad4 0%, #185baf 60%, #124a99 100%)',
-          cursor: dragging.current ? 'grabbing' : 'grab',
+          cursor: 'grab',
         }}
       >
         <GripHorizontal className="w-4 h-4 text-white/40 shrink-0" />
@@ -278,7 +339,7 @@ const ChatbotPanel: React.FC<Props> = ({
           </p>
           <div className="flex items-center gap-1.5 mt-0.5">
             <div className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
-            <span style={{ fontSize: 10, color: '#bfdbfe', fontWeight: 500 }}>Gemini 1.5 Flash · Free Tier</span>
+            <span style={{ fontSize: 10, color: '#bfdbfe', fontWeight: 500 }}>Gemini 2.0 Flash · Free Tier</span>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -341,7 +402,7 @@ const ChatbotPanel: React.FC<Props> = ({
               <div className="flex flex-col gap-4">
                 {/* Welcome card */}
                 <div className="bg-white border border-[#e2e8f0] p-4 shadow-sm">
-                  <div className="flex items-center gap-3 mb-3">
+                  <div className="flex items-center gap-3">
                     <div className="w-9 h-9 flex items-center justify-center bg-[#185baf] shrink-0">
                       <Sparkles className="w-4 h-4 text-white" />
                     </div>
@@ -353,20 +414,6 @@ const ChatbotPanel: React.FC<Props> = ({
                         I have full context of your live timetable
                       </p>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 pt-3 border-t border-[#f1f5f9]">
-                    {[
-                      { label: 'Faculty', value: faculties.length },
-                      { label: 'Rooms', value: rooms.length },
-                      { label: 'Sessions', value: termScheduleCount },
-                    ].map(s => (
-                      <div key={s.label} className="text-center bg-[#f8fafc] border border-[#e2e8f0] py-2">
-                        <p style={{ fontSize: 20, fontWeight: 900, color: '#185baf' }}>{s.value}</p>
-                        <p style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                          {s.label}
-                        </p>
-                      </div>
-                    ))}
                   </div>
                 </div>
 
@@ -393,7 +440,6 @@ const ChatbotPanel: React.FC<Props> = ({
 
             {messages.map(msg => (
               <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                {/* Avatar */}
                 <div
                   className="w-8 h-8 shrink-0 flex items-center justify-center mt-0.5"
                   style={{
@@ -407,7 +453,6 @@ const ChatbotPanel: React.FC<Props> = ({
                   }
                 </div>
 
-                {/* Bubble */}
                 <div className={`flex flex-col gap-1 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div
                     className="px-4 py-3"
@@ -481,7 +526,7 @@ const ChatbotPanel: React.FC<Props> = ({
               </button>
             </div>
             <p style={{ fontSize: 10, color: '#cbd5e1', marginTop: 6 }}>
-              Enter to send · Shift+Enter for new line · Drag the header to move this window
+              Enter to send · Shift+Enter for new line · Drag header to move · Drag edges/corners to resize
             </p>
           </div>
         </>
