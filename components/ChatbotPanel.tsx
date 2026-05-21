@@ -137,8 +137,40 @@ const ChatbotPanel: React.FC<Props> = ({
   const [messages, setMessages]       = useState<Message[]>([]);
   const [input, setInput]             = useState('');
   const [isLoading, setIsLoading]     = useState(false);
-  const [usage, setUsage]             = useState<SessionUsage>({ totalTokens: 0, requestCount: 0 });
+  const [usage, setUsage]             = useState<SessionUsage>(() => {
+    try {
+      const stored = localStorage.getItem('unitime_chat_usage');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const today = new Date().toDateString();
+        if (parsed.date === today) {
+          return {
+            totalTokens: parsed.totalTokens || 0,
+            requestCount: parsed.requestCount || 0,
+          };
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load chat usage from localStorage', e);
+    }
+    return { totalTokens: 0, requestCount: 0 };
+  });
   const [error, setError]             = useState('');
+  const [rawError, setRawError]       = useState('');
+
+  // Save usage to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      const today = new Date().toDateString();
+      localStorage.setItem('unitime_chat_usage', JSON.stringify({
+        date: today,
+        totalTokens: usage.totalTokens,
+        requestCount: usage.requestCount,
+      }));
+    } catch (e) {
+      console.error('Failed to save chat usage to localStorage', e);
+    }
+  }, [usage]);
 
   // Position and size state
   const [pos, setPos]   = useState({ x: window.innerWidth - DEFAULT_W - 12, y: 42 });
@@ -232,6 +264,7 @@ const ChatbotPanel: React.FC<Props> = ({
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading || !aiRef.current) return;
     setError('');
+    setRawError('');
     setIsMinimized(false);
 
     const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: text.trim(), timestamp: new Date() };
@@ -261,13 +294,21 @@ const ChatbotPanel: React.FC<Props> = ({
       setUsage(prev => ({ totalTokens: prev.totalTokens + tokenCount, requestCount: prev.requestCount + 1 }));
       setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: responseText, timestamp: new Date(), tokens: tokenCount }]);
     } catch (err: any) {
+      console.error('Google Gen AI API Error:', err);
       const msg = err?.message || '';
-      if (msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('429'))
-        setError('Daily quota exceeded. Free tier: 1,500 requests/day. Try again tomorrow.');
-      else if (msg.toLowerCase().includes('api key') || msg.toLowerCase().includes('invalid'))
-        setError('Invalid API key. Check GEMINI_API_KEY in Vercel environment variables.');
-      else
-        setError(`Error: ${msg || 'Unknown error.'}`);
+      setRawError(msg);
+      const msgLower = msg.toLowerCase();
+      if (msgLower.includes('quota') || msgLower.includes('429')) {
+        if (msgLower.includes('minute') || msgLower.includes('rpm') || msgLower.includes('limit') || msgLower.includes('exhausted')) {
+          setError('Rate limit exceeded (Requests per minute). Please wait a minute and try again.');
+        } else {
+          setError('Daily quota exceeded. Free tier: 1,500 requests/day. Try again tomorrow.');
+        }
+      } else if (msgLower.includes('api key') || msgLower.includes('invalid')) {
+        setError('Invalid API key. Check GEMINI_API_KEY in environment variables.');
+      } else {
+        setError('An error occurred while communicating with the Gemini API.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -345,7 +386,12 @@ const ChatbotPanel: React.FC<Props> = ({
         <div className="flex items-center gap-1">
           {messages.length > 0 && (
             <button
-              onClick={() => { setMessages([]); setUsage({ totalTokens: 0, requestCount: 0 }); setError(''); }}
+              onClick={() => {
+                setMessages([]);
+                setUsage({ totalTokens: 0, requestCount: 0 });
+                setError('');
+                setRawError('');
+              }}
               title="Clear chat"
               className="p-2 text-white/60 hover:text-white hover:bg-white/15 transition-all rounded"
             >
@@ -494,8 +540,13 @@ const ChatbotPanel: React.FC<Props> = ({
 
             {/* Error */}
             {error && (
-              <div className="px-4 py-3 bg-[#fef2f2] border border-[#fecaca]">
-                <p style={{ fontSize: 12, color: '#dc2626', fontWeight: 500 }}>⚠ {error}</p>
+              <div className="px-4 py-3 bg-[#fef2f2] border border-[#fecaca] rounded space-y-1">
+                <p style={{ fontSize: 12, color: '#dc2626', fontWeight: 600 }}>⚠ {error}</p>
+                {rawError && rawError !== error && (
+                  <p style={{ fontSize: 10, color: '#991b1b', opacity: 0.8, wordBreak: 'break-word', fontFamily: 'monospace', marginTop: 4 }}>
+                    Details: {rawError}
+                  </p>
+                )}
               </div>
             )}
 
