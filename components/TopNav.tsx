@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Wrench, ChevronDown, Save, LogOut, FileText, FileUp, Users, MapPin, GraduationCap, BookOpen, LayoutGrid, Cloud
+  Wrench, ChevronDown, Save, LogOut, FileText, FileUp, Users, MapPin, GraduationCap, BookOpen, LayoutGrid, Cloud, Sparkles
 } from 'lucide-react';
 import { Role, UserAccount, ViewType } from '../types';
 import Logo from './Logo';
@@ -18,6 +18,8 @@ interface TopNavProps {
   onRoomFinder?: () => void;
   onExportPDF?: () => void;
   onExportExcel?: () => void;
+  onAIAssistant?: () => void;
+  isAIOpen?: boolean;
 }
 
 const TopNav: React.FC<TopNavProps> = ({ 
@@ -31,7 +33,9 @@ const TopNav: React.FC<TopNavProps> = ({
   onAutoTile,
   onRoomFinder,
   onExportPDF,
-  onExportExcel
+  onExportExcel,
+  onAIAssistant,
+  isAIOpen = false,
 }) => {
   const [isToolsOpen, setIsToolsOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
@@ -113,6 +117,15 @@ const TopNav: React.FC<TopNavProps> = ({
         <NavItem icon={<LayoutGrid className="w-3.5 h-3.5" />} label="4-Up View" onClick={onAutoTile} />
         <NavItem icon={<MapPin className="w-3.5 h-3.5" />} label="Availability" onClick={onRoomFinder} />
         
+        <Separator />
+        <button
+          onClick={onAIAssistant}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-bold transition-all h-full ${isAIOpen ? 'bg-[#124584] text-white' : 'text-slate-100 hover:bg-[#124584] hover:text-white'}`}
+        >
+          <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+          AI Assistant
+        </button>
+
         <div className="relative h-full flex items-center" ref={exportRef}>
           <button
             onClick={() => setIsExportOpen(!isExportOpen)}
