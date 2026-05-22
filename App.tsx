@@ -15,7 +15,6 @@ import SupabaseSetup from './components/SupabaseSetup';
 import ReportsPanel from './components/ReportsPanel';
 import AutoSchedulePanel from './components/AutoSchedulePanel';
 import RoomAvailabilityTool from './components/RoomAvailabilityTool';
-import ChatbotPanel from './components/ChatbotPanel';
 import {
   Term, Course, Faculty, Room, StudentGroup, ScheduleEntry, Clash, Role, ViewType, UserAccount, DayOfWeek
 } from './types';
@@ -58,7 +57,6 @@ const App: React.FC = () => {
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRoomToolOpen, setIsRoomToolOpen] = useState(false);
-  const [isAIOpen, setIsAIOpen] = useState(false);
 
   // Undo/redo stacks — stored in refs so keyboard handler always sees current value
   const undoStackRef = useRef<ScheduleEntry[][]>([]);
@@ -1050,8 +1048,6 @@ const App: React.FC = () => {
         onRoomFinder={() => setIsRoomToolOpen(true)}
         onExportPDF={handleExportPDF}
         onExportExcel={handleExportExcel}
-        onAIAssistant={() => setIsAIOpen(o => !o)}
-        isAIOpen={isAIOpen}
       />
 
       <main className="flex-1 relative overflow-hidden bg-[#f0f6ff]">
@@ -1189,17 +1185,6 @@ const App: React.FC = () => {
           // Also open / focus a timetable panel for that resource
           addPanel(resourceType, resourceId);
         }}
-      />
-      <ChatbotPanel
-        isOpen={isAIOpen}
-        onClose={() => setIsAIOpen(false)}
-        courses={courses}
-        faculties={faculties}
-        rooms={rooms}
-        groups={groups}
-        schedule={schedule}
-        clashes={clashes}
-        activeTerm={effectiveActiveTerm}
       />
     </div>
   );
