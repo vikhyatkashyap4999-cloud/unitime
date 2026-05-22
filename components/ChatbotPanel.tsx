@@ -345,7 +345,34 @@ const ChatbotPanel: React.FC<Props> = ({
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
   };
 
-  if (!isOpen || !apiKey) return null;
+  if (!isOpen) return null;
+
+  // No API key configured — show setup instructions instead of silently hiding
+  if (!apiKey) return (
+    <div
+      className="fixed z-[980] flex flex-col overflow-hidden"
+      style={{ left: pos.x, top: pos.y, width: 400, background: '#ffffff', border: '1px solid #94a3b8', boxShadow: '0 12px 40px rgba(0,0,0,0.22)' }}
+    >
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-[#0a2d6e]" style={{ background: 'linear-gradient(180deg,#1e6ad4 0%,#185baf 60%,#124a99 100%)' }}>
+        <Sparkles className="w-4 h-4 text-yellow-300" />
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'white' }}>UniTime AI Assistant</span>
+        <button onClick={onClose} className="ml-auto p-1 text-white/60 hover:text-white"><X className="w-4 h-4" /></button>
+      </div>
+      <div className="p-5 space-y-3">
+        <p style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>⚠ API Key Not Configured</p>
+        <p style={{ fontSize: 12, color: '#334155', lineHeight: 1.6 }}>
+          The AI Assistant requires a Gemini API key. To set it up:
+        </p>
+        <ol style={{ fontSize: 12, color: '#334155', lineHeight: 1.8, paddingLeft: 16 }}>
+          <li>Go to <strong>aistudio.google.com</strong> (sign in with personal Gmail)</li>
+          <li>Click <strong>Get API key → Create API key</strong></li>
+          <li>In Vercel → Project → <strong>Settings → Environment Variables</strong></li>
+          <li>Add <code style={{ background: '#f1f5f9', padding: '1px 4px', fontSize: 11 }}>GEMINI_API_KEY</code> = your key (tick <strong>Production</strong>)</li>
+          <li>Go to <strong>Deployments → Redeploy</strong></li>
+        </ol>
+      </div>
+    </div>
+  );
 
   const reqPct    = Math.min(100, (usage.requestCount / DAILY_REQ_LIMIT) * 100);
   const remaining = Math.max(0, DAILY_REQ_LIMIT - usage.requestCount);
