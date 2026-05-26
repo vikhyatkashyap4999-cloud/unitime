@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { Download, Upload, Zap, CheckCircle, AlertTriangle, FileText, X, ChevronDown, ChevronUp, MapPin, Clock, Coffee, Calendar, GraduationCap } from 'lucide-react';
@@ -171,6 +171,17 @@ const AutoSchedulePanel: React.FC<Props> = ({
   const [result,         setResult]        = useState<SchedulerResult | null>(null);
   const [showUnresolved, setShowUnresolved] = useState(false);
   const [applying,       setApplying]      = useState(false);
+
+  // Reset result when the timetable is cleared externally
+  useEffect(() => {
+    if (result !== null && schedule.length === 0) {
+      setResult(null);
+      setStage('idle');
+      setProgress(0);
+      setLabel('');
+      setShowUnresolved(false);
+    }
+  }, [schedule.length]);
 
   const activeTerm = terms.find(t => t.id === activeTermId);
 
