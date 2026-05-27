@@ -559,15 +559,14 @@ const AutoSchedulePanel: React.FC<Props> = ({
                     {stage === 'running' ? 'Generating…' : '✓ Complete'}
                   </p>
                   <span className="ml-auto text-[16px] font-black" style={{ color: pct === 100 ? '#059669' : '#4338ca' }}>{pct}%</span>
-                  {/* Always-visible conflict report download — available regardless of unresolved count */}
+                  {/* Conflict report icon — always visible in status bar after completion */}
                   {result && stage === 'done' && (
                     <button
                       onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term')}
-                      className="flex items-center gap-1 px-2 py-1 text-[8px] font-black uppercase tracking-wide text-white hover:opacity-90 transition-opacity shrink-0 ml-2"
+                      className="w-6 h-6 flex items-center justify-center shrink-0 ml-1 hover:opacity-80 transition-opacity"
                       style={{ background: result.unresolved.length > 0 ? 'linear-gradient(135deg,#d97706,#b45309)' : 'linear-gradient(135deg,#059669,#047857)' }}
-                      title={result.unresolved.length > 0 ? 'Download conflict report as Excel' : 'Download conflict report (0 conflicts — all sessions placed)'}>
-                      <Download className="w-2.5 h-2.5" />
-                      {result.unresolved.length > 0 ? `${result.unresolved.length} Conflicts` : '✓ No Conflicts'}
+                      title={result.unresolved.length > 0 ? `Download conflict report (${result.unresolved.length} unresolved)` : 'Download report — all sessions placed successfully'}>
+                      <Download className="w-3 h-3 text-white" />
                     </button>
                   )}
                 </div>
@@ -612,22 +611,22 @@ const AutoSchedulePanel: React.FC<Props> = ({
                   {/* Unresolved */}
                   {result && result.unresolved.length > 0 && (
                     <div className="border-2 border-[#fde68a] overflow-hidden">
-                      {/* Header row with expand + download */}
-                      <div className="flex items-center px-3 py-2" style={{ background: 'linear-gradient(135deg,#fffbeb,#fef3c7)' }}>
-                        <button onClick={() => setShowUnresolved(s => !s)}
-                          className="flex-1 flex items-center gap-1.5 text-[9px] font-black text-[#d97706] uppercase tracking-widest hover:opacity-80 transition-opacity text-left">
-                          <AlertTriangle className="w-3 h-3 shrink-0" />
-                          {result.unresolved.length} Unresolved Sessions
-                          {showUnresolved ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
-                        </button>
-                        <button
-                          onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term')}
-                          className="flex items-center gap-1 px-2 py-1 text-[8px] font-black uppercase tracking-wide text-white hover:opacity-90 transition-opacity shrink-0"
-                          style={{ background: 'linear-gradient(135deg,#d97706,#b45309)' }}
-                          title="Download detailed conflict report as Excel">
-                          <Download className="w-2.5 h-2.5" /> Excel Report
-                        </button>
-                      </div>
+                      {/* Toggle header */}
+                      <button
+                        onClick={() => setShowUnresolved(s => !s)}
+                        className="w-full flex items-center gap-1.5 px-3 py-2 text-[9px] font-black text-[#d97706] uppercase tracking-widest hover:opacity-80 transition-opacity text-left"
+                        style={{ background: 'linear-gradient(135deg,#fffbeb,#fef3c7)' }}>
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span className="flex-1">{result.unresolved.length} Unresolved Sessions</span>
+                        {showUnresolved ? <ChevronUp className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
+                      </button>
+                      {/* Download button — full width so it's always visible */}
+                      <button
+                        onClick={() => downloadConflictReport(result.unresolved, activeTerm?.name ?? 'term')}
+                        className="w-full flex items-center justify-center gap-1.5 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:opacity-90 transition-opacity"
+                        style={{ background: 'linear-gradient(135deg,#d97706,#b45309)' }}>
+                        <Download className="w-3.5 h-3.5" /> Download Conflict Report (Excel)
+                      </button>
 
                       {showUnresolved && (
                         <div className="overflow-x-auto">
