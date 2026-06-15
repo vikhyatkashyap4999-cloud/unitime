@@ -399,6 +399,12 @@ export async function runAutoScheduler(
       const allowedHours = new Set(parseHours(asgn.courseTimeBlock));
       candidateSlots = slots.filter(sl => allowedHours.has(parseInt(sl.startTime)));
     }
+    // Labs without an explicit courseTimeBlock are restricted to even start hours
+    // (8,10,12,14,16,18) so sessions pack as 8-10, 10-12, 14-16, 16-18 with no
+    // odd-hour fragments, allowing a faculty to reach 30h without slot waste.
+    if (isLab && !asgn.courseTimeBlock.trim()) {
+      candidateSlots = candidateSlots.filter(sl => parseInt(sl.startTime) % 2 === 0);
+    }
 
     let placed = 0;
     let rejFaculty = 0, rejCohort = 0, rejConsec = 0, rejFixedRoom = 0, noRoomAssigned = 0;
