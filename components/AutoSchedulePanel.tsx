@@ -160,6 +160,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
   const [result,         setResult]        = useState<SchedulerResult | null>(null);
   const [showUnresolved, setShowUnresolved] = useState(false);
   const [applying,       setApplying]      = useState(false);
+  const [isApplied,      setIsApplied]     = useState(false);
 
   // Reset result when the timetable is cleared externally
   useEffect(() => {
@@ -229,7 +230,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
           lunchStart:     parseInt(r.CohortLunchStart) || defLunch,
         })).filter(a => a.facultyId);
         if (!parsed.length) { setParseError('No valid rows — check column headers match template'); return; }
-        setAssignments(parsed); setCourseFileName(file.name); setResult(null);
+        setAssignments(parsed); setCourseFileName(file.name); setResult(null); setIsApplied(false);
       },
       error: (e) => setParseError(e.message),
     });
@@ -263,10 +264,11 @@ const AutoSchedulePanel: React.FC<Props> = ({
   };
 
   const handleApply = async () => {
-    if (!result) return;
+    if (!result || isApplied) return;
     setApplying(true);
     await onApplySchedule(result.entries.map(({ id: _id, departmentId: _d, ...rest }) => rest) as any);
     setApplying(false);
+    setIsApplied(true);
     alert(`✅ ${result.entries.length} sessions applied. Switch to Timetable Builder to view them.`);
   };
 
@@ -587,11 +589,11 @@ const AutoSchedulePanel: React.FC<Props> = ({
 
                   {/* Apply */}
                   {result && result.entries.length > 0 && (
-                    <button onClick={handleApply} disabled={applying}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 text-[11px] font-black uppercase tracking-widest text-white hover:opacity-90 transition-all disabled:opacity-50"
-                      style={{ background: 'linear-gradient(135deg,#059669,#0d9488,#10b981)' }}>
+                    <button onClick={handleApply} disabled={applying || isApplied}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 text-[11px] font-black uppercase tracking-widest text-white transition-all disabled:cursor-not-allowed"
+                      style={{ background: isApplied ? 'linear-gradient(135deg,#64748b,#475569)' : 'linear-gradient(135deg,#059669,#0d9488,#10b981)', opacity: applying ? 0.6 : 1 }}>
                       <CheckCircle className="w-4 h-4" />
-                      {applying ? 'Applying…' : `Apply ${result.entries.length} Sessions to Timetable`}
+                      {applying ? 'Applying…' : isApplied ? `✓ Sessions Already Applied — Re-upload CSV to apply again` : `Apply ${result.entries.length} Sessions to Timetable`}
                     </button>
                   )}
 
