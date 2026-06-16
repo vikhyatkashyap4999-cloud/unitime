@@ -25,7 +25,7 @@ export interface CourseAssignment {
   workingDays: string;        // 'Mon-Fri' | 'Tue-Sat'
   timeStart: number;          // 8 or 10
   timeEnd: number;            // 16 or 18
-  lunchStart: number;         // e.g. 13
+  lunchStart: string;         // "13" (fixed) or "12-14" (flexible — rotates per day)
 }
 
 export interface ConflictDiagnostics {
@@ -140,6 +140,27 @@ function parseDays(s: string): string[] {
 
 function parseHours(s: string): number[] {
   return s.split(',').map(t => parseInt(t.trim())).filter(n => !isNaN(n) && n >= 0 && n <= 23);
+}
+
+// "13" -> [13] (fixed lunch hour every day).
+// "12-14" -> [12, 13] (valid 1-hour lunch start times within the 12:00-14:00 window;
+// the caller rotates through these across days so lunch can fall on a different hour
+// each day, e.g. Monday lunch at 12, Tuesday lunch at 13).
+function parseLunchRange(s: string, fallback: number): number[] {
+  const t = s.trim();
+  if (!t) return [fallback];
+  const rangeMatch = t.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+  if (rangeMatch) {
+    const start = parseInt(rangeMatch[1]);
+    const end = parseInt(rangeMatch[2]);
+    if (!isNaN(start) && !isNaN(end) && start < end) {
+      const hours: number[] = [];
+      for (let h = start; h < end; h++) hours.push(h);
+      return hours;
+    }
+  }
+  const n = parseInt(t);
+  return !isNaN(n) ? [n] : [fallback];
 }
 
 // Returns true if adding newKeys for entityId on the given day would create
@@ -385,7 +406,12 @@ export async function runAutoScheduler(
       : isEdge ? Math.round(asgn.credits / 2)
       : asgn.credits;
     const days  = parseDays(asgn.workingDays).length ? parseDays(asgn.workingDays) : DAYS_MAP['Mon-Fri'];
-    const slots = buildSlots(asgn.timeStart || 8, asgn.timeEnd || 16, asgn.lunchStart || 13, duration);
+    // Lunch hour rotates across the week when CohortLunchStart is a range (e.g. "12-14"):
+    // Monday gets the first valid hour, Tuesday the next, cycling through — so the same
+    // cohort can have lunch at 12 on Monday and 13 on Tuesday instead of one fixed hour.
+    const lunchHours = parseLunchRange(asgn.lunchStart, 13);
+    const dayLunchMap = new Map<string, number>();
+    days.forEach((day, i) => dayLunchMap.set(day, lunchHours[i % lunchHours.length]));
 
     const course   = findCourse(asgn.courseCode);
     const faculty  = findFaculty(asgn.facultyId, asgn.facultyName);
@@ -402,21 +428,20 @@ export async function runAutoScheduler(
       const restricted = parseDays(asgn.courseDayBlock);
       if (restricted.length > 0) candidateDays = days.filter(d => restricted.includes(d));
     }
-    let candidateSlots = slots;
-    if (asgn.courseTimeBlock.trim()) {
-      const allowedHours = new Set(parseHours(asgn.courseTimeBlock));
-      candidateSlots = slots.filter(sl => allowedHours.has(parseInt(sl.startTime)));
-    }
-    // Labs without an explicit courseTimeBlock are restricted to even start hours
-    // (8,10,12,14,16,18) so sessions pack as 8-10, 10-12, 14-16, 16-18 with no
-    // odd-hour fragments, allowing a faculty to reach 30h without slot waste.
-    if (isLab && !asgn.courseTimeBlock.trim()) {
-      candidateSlots = candidateSlots.filter(sl => parseInt(sl.startTime) % 2 === 0);
-    }
+    const allowedHours = asgn.courseTimeBlock.trim() ? new Set(parseHours(asgn.courseTimeBlock)) : null;
 
     let placed = 0;
     let rejFaculty = 0, rejCohort = 0, rejConsec = 0, rejFixedRoom = 0, noRoomAssigned = 0;
-    const candidates = shuffle(candidateDays.flatMap(day => candidateSlots.map(sl => ({ day, ...sl }))));
+    const candidates = shuffle(candidateDays.flatMap(day => {
+      const lunch = dayLunchMap.get(day) ?? 13;
+      let daySlots = buildSlots(asgn.timeStart || 8, asgn.timeEnd || 16, lunch, duration);
+      if (allowedHours) daySlots = daySlots.filter(sl => allowedHours.has(parseInt(sl.startTime)));
+      // Labs without an explicit courseTimeBlock are restricted to even start hours
+      // (8,10,12,14,16,18) so sessions pack as 8-10, 10-12, 14-16, 16-18 with no
+      // odd-hour fragments, allowing a faculty to reach 30h without slot waste.
+      if (isLab && !asgn.courseTimeBlock.trim()) daySlots = daySlots.filter(sl => parseInt(sl.startTime) % 2 === 0);
+      return daySlots.map(sl => ({ day, ...sl }));
+    }));
 
     for (const { day, startTime, endTime } of candidates) {
       if (placed >= sessionsNeeded) break;
@@ -501,7 +526,7 @@ export async function runAutoScheduler(
 
     if (placed < sessionsNeeded) {
       const diag = buildDiagnostics(
-        asgn, days.length * slots.length,
+        asgn, candidates.length,
         rejFaculty, rejCohort, rejConsec, rejFixedRoom, noRoomAssigned,
         placed, sessionsNeeded,
       );
@@ -542,7 +567,9 @@ export async function runAutoScheduler(
 // 24:Explo-Day-Block  25:Explo-Time-Block  (blocks both faculty AND cohort)
 // 26:Course-Day-Block  27:Course-Time-Block  (restrict this course to specific days/hours only)
 // 28:FacultyBlockDay  29:FacultyBlockTime  30:CohortBlockDay  31:CohortBlockTime
-// 32:FacultyWorkingDays  33:FacultyTimeStart  34:FacultyTimeEnd  35:CohortLunchStart
+// 32:FacultyWorkingDays  33:FacultyTimeStart  34:FacultyTimeEnd
+// 35:CohortLunchStart — "13" fixes lunch every day; "12-14" rotates the lunch
+//   hour across the week (Mon=12, Tue=13, Wed=12, ...) for extra packing flexibility
 
 function _row(
   facultyId: string, facultyName: string, school: string,
@@ -626,6 +653,12 @@ export const COURSE_TEMPLATE_CSV = [
     ['CS-Y4-A'], '','','','2',
     '','', '','', 'Friday','14,15', 'Wednesday','8,9',
     '','8','16','13'),
+  // Flexible lunch — CohortLunchStart="12-14" rotates lunch Mon=12, Tue=13, Wed=12...
+  // instead of one fixed hour every day, giving the scheduler more packing room.
+  _row('600006','Maria Garcia','School of Engineering','CS601','Algorithms','3','Theory','K1',
+    ['CS-Y3-A'], '','','','1',
+    '','', '','', '','', '','',
+    'Mon-Fri','8','16','12-14'),
 ].join('\n');
 
 export const ROOM_CAMPUS_TEMPLATE_CSV = [

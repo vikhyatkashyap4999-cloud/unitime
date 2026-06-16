@@ -119,7 +119,7 @@ const COLS: [string, string, string, string, string][] = [
   ['FacultyWorkingDays', 'Mon-Fri or Tue-Sat (blank = Step 3 default)', '#d97706', '#fffbeb', '#fde68a'],
   ['FacultyTimeStart',   '8 or 10 (faculty roster)',   '#64748b', '#f8fafc', '#e2e8f0'],
   ['FacultyTimeEnd',     '16 or 18 (faculty roster)',  '#64748b', '#f8fafc', '#e2e8f0'],
-  ['CohortLunchStart',   '12, 13, or 14 (cohort)',     '#64748b', '#f8fafc', '#e2e8f0'],
+  ['CohortLunchStart',   '13 (fixed) or "12-14" (rotates per day)', '#64748b', '#f8fafc', '#e2e8f0'],
 ];
 
 const STEP_GRADS = [
@@ -228,7 +228,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
           workingDays:    (r.FacultyWorkingDays || '').trim() as any,
           timeStart:      parseInt(r.FacultyTimeStart) || defStart,
           timeEnd:        parseInt(r.FacultyTimeEnd)   || defEnd,
-          lunchStart:     parseInt(r.CohortLunchStart) || defLunch,
+          lunchStart:     (r.CohortLunchStart || '').trim() || String(defLunch),
         })).filter(a => a.facultyId);
         if (!parsed.length) { setParseError('No valid rows — check column headers match template'); return; }
         setAssignments(parsed); setCourseFileName(file.name); setResult(null); setIsApplied(false);
@@ -339,7 +339,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                 </button>
               </div>
               <p className="text-[9px] text-[#4338ca] leading-relaxed bg-[#eef2ff] border border-[#c7d2fe] px-2 py-1.5">
-                Leave <strong>FacultyWorkingDays</strong> blank to use the default days set in Step 3. Explicit "Mon-Fri" or "Tue-Sat" values are always respected. <strong>PreferredRooms</strong>: "R1|R2" pipe-separated. Block columns accept pipe-sep days/hours. Faculty max 2 consecutive hours (4-hr labs exempt).
+                Leave <strong>FacultyWorkingDays</strong> blank to use the default days set in Step 3. Explicit "Mon-Fri" or "Tue-Sat" values are always respected. <strong>PreferredRooms</strong>: "R1|R2" pipe-separated. Block columns accept pipe-sep days/hours. Faculty max 2 consecutive hours (4-hr labs exempt). <strong>CohortLunchStart</strong>: "13" fixes lunch every day; "12-14" rotates lunch across Mon→Sat (e.g. Mon=12, Tue=13) for extra packing flexibility.
               </p>
             </div>
           </div>
