@@ -163,17 +163,56 @@ function parseHours(s: string): number[] {
 function parseLunchRange(s: string, fallback: number): number[] {
   const t = s.trim();
   if (!t) return [fallback];
-  const rangeMatch = t.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+
+  // Try standard formats like "12-14", "12 to 14", "12,14", "12:14"
+  const rangeMatch = t.match(/^(\d{1,2})\s*[-to,:]+\s*(\d{1,2})$/i);
   if (rangeMatch) {
-    const start = parseInt(rangeMatch[1]);
-    const end = parseInt(rangeMatch[2]);
+    const start = parseInt(rangeMatch[1], 10);
+    const end = parseInt(rangeMatch[2], 10);
     if (!isNaN(start) && !isNaN(end) && start < end) {
       const hours: number[] = [];
       for (let h = start; h < end; h++) hours.push(h);
       return hours;
     }
   }
-  const n = parseInt(t);
+
+  // Workaround for Excel auto-date conversion (e.g., "12-14" becomes "14-Dec" or "Dec-14")
+  const dateMatch1 = t.match(/^(\d{1,2})\s*-\s*([a-zA-Z]{3})$/); // e.g., "14-Dec"
+  const dateMatch2 = t.match(/^([a-zA-Z]{3})\s*-\s*(\d{1,2})$/); // e.g., "Dec-14"
+  const monthMap: Record<string, number> = {
+    jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+    jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12
+  };
+  
+  let dateA: number | null = null;
+  let dateB: number | null = null;
+
+  if (dateMatch1) {
+    const m = monthMap[dateMatch1[2].toLowerCase()];
+    if (m !== undefined) { dateA = parseInt(dateMatch1[1], 10); dateB = m; }
+  } else if (dateMatch2) {
+    const m = monthMap[dateMatch2[1].toLowerCase()];
+    if (m !== undefined) { dateA = parseInt(dateMatch2[2], 10); dateB = m; }
+  } else {
+    // Also handle "12/14/2024" or "14/12/2024"
+    const slashMatch = t.match(/^(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?$/);
+    if (slashMatch) {
+      dateA = parseInt(slashMatch[1], 10);
+      dateB = parseInt(slashMatch[2], 10);
+    }
+  }
+
+  if (dateA !== null && dateB !== null) {
+    const start = Math.min(dateA, dateB);
+    const end = Math.max(dateA, dateB);
+    if (start < end) {
+      const hours: number[] = [];
+      for (let h = start; h < end; h++) hours.push(h);
+      return hours;
+    }
+  }
+
+  const n = parseInt(t, 10);
   return !isNaN(n) ? [n] : [fallback];
 }
 
