@@ -88,13 +88,11 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
   const current = typeConfig[resourceType];
   const accentColor = current.accent;
 
-  const selectCls = "bg-[#1e293b] text-white/80 border border-white/10 px-2.5 py-1.5 text-[11px] font-bold outline-none focus:border-[#185baf] cursor-pointer transition-colors";
+  const selectCls = "bg-[#f8fafc] text-[#0f172a] border border-[#cbd5e1] px-2.5 py-1.5 text-[11px] font-bold outline-none focus:border-[#185baf] cursor-pointer transition-colors rounded-sm";
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm pointer-events-auto" onClick={onClose} />
-
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 pointer-events-none">
         <motion.div
           drag
           dragMomentum={false}
@@ -104,64 +102,69 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.96, opacity: 0, y: 12 }}
           transition={{ duration: 0.2 }}
-          className="relative pointer-events-auto flex flex-col w-full max-w-[1300px] overflow-hidden"
+          className="relative pointer-events-auto flex flex-col bg-white overflow-hidden"
           style={{
-            height: '84vh',
-            boxShadow: '0 32px 80px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.08)',
-            borderRadius: 2,
+            width: '750px',
+            maxWidth: '95vw',
+            height: '85vh',
+            minHeight: '400px',
+            boxShadow: '0 32px 80px rgba(0,0,0,0.2), 0 0 0 1px rgba(0,0,0,0.05)',
+            borderRadius: 8,
+            resize: 'both',
+            overflow: 'auto',
           }}
         >
           {/* ── Title Bar ───────────────────────────────────── */}
           <div
-            className="flex justify-between items-center px-4 py-2.5 cursor-move select-none shrink-0"
-            style={{ background: 'linear-gradient(90deg,#0f172a 0%,#1e3a5f 45%,#185baf 100%)' }}
+            className="flex justify-between items-center px-4 py-2.5 cursor-move select-none shrink-0 border-b border-[#e2e8f0]"
+            style={{ background: '#f8fafc' }}
             onPointerDown={(e) => dragControls.start(e)}
           >
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-7 h-7 rounded" style={{ background: `${accentColor}30`, border: `1px solid ${accentColor}60` }}>
+              <div className="flex items-center justify-center w-7 h-7 rounded" style={{ background: `${accentColor}15`, border: `1px solid ${accentColor}30` }}>
                 <span style={{ color: accentColor }}>{current.icon}</span>
               </div>
               <div>
-                <h2 className="text-[13px] font-black text-white tracking-wide uppercase">{current.label} Availability</h2>
-                <p className="text-[9px] font-bold text-white/40 uppercase tracking-widest leading-none mt-0.5">Usage Chart · {day} · Week {week}</p>
+                <h2 className="text-[13px] font-black text-[#0f172a] tracking-wide uppercase">{current.label} Availability</h2>
+                <p className="text-[9px] font-bold text-[#64748b] uppercase tracking-widest leading-none mt-0.5">Usage Chart · {day} · Week {week}</p>
               </div>
             </div>
 
             <div className="flex items-center gap-5">
               {/* Legend */}
-              <div className="flex gap-3 items-center border-r border-white/10 pr-5">
+              <div className="flex gap-3 items-center border-r border-[#e2e8f0] pr-5">
                 {[
-                  { color: '#22c55e', bg: '#14532d', label: 'Free', icon: <CheckCircle2 className="w-3 h-3" /> },
-                  { color: '#f87171', bg: '#7f1d1d', label: 'Busy', icon: <XCircle className="w-3 h-3" /> },
-                  { color: '#fbbf24', bg: '#78350f', label: 'Conflict', icon: <AlertTriangle className="w-3 h-3" /> },
+                  { color: '#15803d', bg: '#dcfce7', label: 'Free', icon: <CheckCircle2 className="w-3 h-3" /> },
+                  { color: '#b91c1c', bg: '#fee2e2', label: 'Busy', icon: <XCircle className="w-3 h-3" /> },
+                  { color: '#b45309', bg: '#fef3c7', label: 'Conflict', icon: <AlertTriangle className="w-3 h-3" /> },
                 ].map(l => (
-                  <div key={l.label} className="flex items-center gap-1.5 px-2 py-1 rounded" style={{ background: `${l.bg}60` }}>
+                  <div key={l.label} className="flex items-center gap-1.5 px-2 py-1 rounded" style={{ background: l.bg }}>
                     <span style={{ color: l.color }}>{l.icon}</span>
                     <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: l.color }}>{l.label}</span>
                   </div>
                 ))}
               </div>
-              <span className="text-[9px] text-white/30 font-bold uppercase tracking-widest hidden lg:block">Double-click → create event</span>
+              <span className="text-[9px] text-[#94a3b8] font-bold uppercase tracking-widest hidden lg:block">Double-click → create event</span>
               <button
                 onClick={onClose}
-                className="w-7 h-7 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 rounded transition-colors font-bold text-sm"
+                className="w-7 h-7 flex items-center justify-center text-[#64748b] hover:text-[#0f172a] hover:bg-[#e2e8f0] rounded transition-colors font-bold text-sm"
               >✕</button>
             </div>
           </div>
 
           {/* ── Controls Bar ────────────────────────────────── */}
-          <div className="shrink-0 px-4 py-2.5 flex items-center gap-4 flex-wrap border-b" style={{ background: '#0f172a', borderColor: 'rgba(255,255,255,0.08)' }}>
+          <div className="shrink-0 px-4 py-2.5 flex items-center gap-4 flex-wrap border-b border-[#e2e8f0]" style={{ background: '#fff' }}>
 
             {/* Resource type — segmented pills */}
-            <div className="flex items-center rounded-full p-0.5 gap-0.5" style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <div className="flex items-center rounded-full p-0.5 gap-0.5" style={{ background: '#f1f5f9' }}>
               {(['Room', 'Faculty', 'Cohort'] as ResourceType[]).map(type => (
                 <button
                   key={type}
                   onClick={() => { setResourceType(type); setSearchQuery(''); }}
                   className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-bold uppercase tracking-wide rounded-full transition-all"
                   style={resourceType === type
-                    ? { background: typeConfig[type].accent, color: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.35)' }
-                    : { color: 'rgba(255,255,255,0.55)' }
+                    ? { background: typeConfig[type].accent, color: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }
+                    : { color: '#64748b' }
                   }
                 >
                   {typeConfig[type].icon}
@@ -170,11 +173,11 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
               ))}
             </div>
 
-            <div className="w-px h-5" style={{ background: 'rgba(255,255,255,0.1)' }} />
+            <div className="w-px h-5 bg-[#e2e8f0]" />
 
             {/* Day */}
             <div className="flex items-center gap-2">
-              <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Day</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-[#94a3b8]">Day</span>
               <select value={day} onChange={e => setDay(e.target.value as DayOfWeek)} className={selectCls}>
                 {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
@@ -182,11 +185,11 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
 
             {/* Time range */}
             <div className="flex items-center gap-2">
-              <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>From</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-[#94a3b8]">From</span>
               <select value={startTimeFilter} onChange={e => setStartTimeFilter(e.target.value)} className={selectCls}>
                 {TIME_SLOTS.map(t => <option key={t} value={t}>{formatTime12h(t)}</option>)}
               </select>
-              <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>To</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-[#94a3b8]">To</span>
               <select value={endTimeFilter} onChange={e => setEndTimeFilter(e.target.value)} className={selectCls}>
                 {TIME_SLOTS.map(t => <option key={t} value={t}>{formatTime12h(t)}</option>)}
               </select>
@@ -194,27 +197,27 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
 
             {/* Week */}
             <div className="flex items-center gap-2">
-              <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Week</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-[#94a3b8]">Week</span>
               <select value={week} onChange={e => setWeek(Number(e.target.value))} className={selectCls}>
                 {Array.from({ length: TOTAL_WEEKS }, (_, i) => i + 1).map(w => <option key={w} value={w}>Week {w}</option>)}
               </select>
             </div>
 
-            <div className="w-px h-5" style={{ background: 'rgba(255,255,255,0.1)' }} />
+            <div className="w-px h-5 bg-[#e2e8f0]" />
 
             {/* Search */}
             <div className="flex-1 min-w-[200px] relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: 'rgba(255,255,255,0.35)' }} />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none text-[#94a3b8]" />
               <input
                 type="text"
                 placeholder={`Search ${resourceType.toLowerCase()}s…`}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-1.5 text-[11px] font-bold outline-none transition-colors placeholder:text-white/30"
+                className="w-full pl-9 pr-4 py-1.5 text-[11px] font-bold outline-none transition-colors placeholder:text-[#94a3b8] rounded-sm"
                 style={{
-                  background: 'rgba(255,255,255,0.07)',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  color: 'rgba(255,255,255,0.85)',
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  color: '#0f172a',
                 }}
               />
             </div>
@@ -227,7 +230,7 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
                 <tr>
                   {/* Resource header */}
                   <th className="sticky left-0 z-30 w-[160px] px-3 py-2 text-left border-r border-b"
-                    style={{ background: '#1e293b', borderColor: '#334155' }}>
+                    style={{ background: '#f8fafc', borderColor: '#e2e8f0' }}>
                     <div className="flex items-center gap-1.5" style={{ color: accentColor }}>
                       {current.icon}
                       <span className="text-[9px] font-black uppercase tracking-widest">{resourceType}</span>
@@ -242,22 +245,22 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
                       <th key={t}
                         className="border-b border-r p-0 relative"
                         style={{
-                          borderColor: isHour ? '#334155' : '#2d3748',
-                          background: '#1e293b',
+                          borderColor: '#e2e8f0',
+                          background: '#f8fafc',
                           minWidth: 28,
                         }}>
                         {/* Heat strip */}
                         {heatPct > 0 && (
                           <div className="absolute bottom-0 left-0 right-0"
-                            style={{ height: `${Math.min(heatPct * 0.6, 4)}px`, background: heatPct > 60 ? '#f87171' : '#fbbf24', opacity: 0.7 }} />
+                            style={{ height: `${Math.min(heatPct * 0.6, 4)}px`, background: heatPct > 60 ? '#ef4444' : '#f59e0b', opacity: 0.7 }} />
                         )}
                         <div className="py-1.5 flex items-center justify-center">
                           {isHour ? (
-                            <span className="text-[9px] font-black text-white/70 tracking-tight">
+                            <span className="text-[9px] font-black text-[#475569] tracking-tight">
                               {formatTime12h(t).replace(':00', '').replace(' ', '')}
                             </span>
                           ) : (
-                            <span className="text-[7px] font-bold text-white/20">·</span>
+                            <span className="text-[7px] font-bold text-[#cbd5e1]">·</span>
                           )}
                         </div>
                       </th>
@@ -354,7 +357,7 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
                 {resources.length === 0 && (
                   <tr>
                     <td colSpan={filteredTimeSlots.length + 1} className="py-16 text-center">
-                      <div className="flex flex-col items-center gap-2 opacity-40">
+                      <div className="flex flex-col items-center gap-2 opacity-60">
                         <Search className="w-8 h-8 text-[#94a3b8]" />
                         <p className="text-[11px] font-bold text-[#94a3b8] uppercase tracking-widest">No {resourceType.toLowerCase()}s found</p>
                       </div>
@@ -366,18 +369,18 @@ const ResourceFinder: React.FC<ResourceFinderProps> = ({
           </div>
 
           {/* ── Footer ──────────────────────────────────────── */}
-          <div className="shrink-0 px-4 py-2 flex justify-between items-center border-t" style={{ background: '#1e293b', borderColor: '#334155' }}>
+          <div className="shrink-0 px-4 py-2 flex justify-between items-center border-t border-[#e2e8f0]" style={{ background: '#f8fafc' }}>
             <div className="flex items-center gap-4 text-[9px] font-black uppercase tracking-widest">
-              <span className="flex items-center gap-1.5 text-white/50">
+              <span className="flex items-center gap-1.5 text-[#64748b]">
                 <Calendar className="w-3.5 h-3.5" />
                 {day} · Week {week}
               </span>
-              <span className="w-px h-3 bg-white/10" />
+              <span className="w-px h-3 bg-[#cbd5e1]" />
               <span style={{ color: accentColor }}>{resources.length} {resourceType.toLowerCase()}s shown</span>
-              <span className="w-px h-3 bg-white/10" />
-              <span className="text-white/30">{filteredTimeSlots.length} time slots</span>
+              <span className="w-px h-3 bg-[#cbd5e1]" />
+              <span className="text-[#64748b]">{filteredTimeSlots.length} time slots</span>
             </div>
-            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest italic">
+            <span className="text-[8px] font-bold text-[#94a3b8] uppercase tracking-widest italic">
               Double-click any cell to create event or open timetable
             </span>
           </div>
