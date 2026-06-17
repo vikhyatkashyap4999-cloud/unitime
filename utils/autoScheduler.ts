@@ -91,10 +91,9 @@ function padTime(h: number): string {
   return `${String(hh).padStart(2, '0')}:${mm}`;
 }
 
-function buildSlots(start: number, end: number, lunch: number, dur: number) {
+function buildSlots(start: number, end: number, dur: number) {
   const out: { startTime: string; endTime: string }[] = [];
   for (let h = start; h + dur <= end; h++) {
-    if (h < lunch + 1 && h + dur > lunch) continue;
     out.push({ startTime: padTime(h), endTime: padTime(h + dur) });
   }
   return out;
@@ -113,6 +112,18 @@ function slotKeys(day: string, st: string, et: string): string[] {
 function isFree(occ: Map<string, Set<string>>, id: string, keys: string[]) {
   const s = occ.get(id);
   return !s || keys.every(k => !s.has(k));
+}
+
+function leavesLunchFree(occ: Map<string, Set<string>>, id: string, day: string, lunchHours: number[], keysToAdd: string[]) {
+  const s = occ.get(id);
+  let freeCount = 0;
+  for (const lh of lunchHours) {
+    const k = `${day}~${pad(lh).substring(0, 2)}`; // e.g. "Mon~12" since pad(lh) is "12:00"
+    const isCurrentlyFree = !s || !s.has(k);
+    const isToBeOccupied = keysToAdd.includes(k);
+    if (isCurrentlyFree && !isToBeOccupied) freeCount++;
+  }
+  return freeCount > 0;
 }
 
 function markBusy(occ: Map<string, Set<string>>, id: string, keys: string[]) {
@@ -512,12 +523,9 @@ export async function runAutoScheduler(
       : isEdge ? Math.round(asgn.credits / 2)
       : asgn.credits;
     const days  = parseDays(asgn.workingDays).length ? parseDays(asgn.workingDays) : DAYS_MAP['Mon-Fri'];
-    // Lunch hour rotates across the week when CohortLunchStart is a range (e.g. "12-14"):
-    // Monday gets the first valid hour, Tuesday the next, cycling through — so the same
-    // cohort can have lunch at 12 on Monday and 13 on Tuesday instead of one fixed hour.
+    // Lunch hour is chosen dynamically: the scheduler ensures that placing this
+    // course leaves at least one of these hours free for the cohort to have lunch.
     const lunchHours = parseLunchRange(asgn.lunchStart, 13);
-    const dayLunchMap = new Map<string, number>();
-    days.forEach((day, i) => dayLunchMap.set(day, lunchHours[i % lunchHours.length]));
 
     const course   = findCourse(asgn.courseCode);
     const faculty  = findFaculty(asgn.facultyId, asgn.facultyName);
@@ -539,8 +547,7 @@ export async function runAutoScheduler(
     let placed = 0;
     let rejFaculty = 0, rejCohort = 0, rejConsec = 0, rejFixedRoom = 0, rejNoRoom = 0;
     const rawCandidates = candidateDays.flatMap(day => {
-      const lunch = dayLunchMap.get(day) ?? 13;
-      let daySlots = buildSlots(asgn.timeStart || 8, asgn.timeEnd || 16, lunch, duration);
+      let daySlots = buildSlots(asgn.timeStart || 8, asgn.timeEnd || 16, duration);
       if (allowedHours) daySlots = daySlots.filter(sl => allowedHours.has(parseInt(sl.startTime)));
       // Labs without an explicit courseTimeBlock are restricted to even start hours
       // (8,10,12,14,16,18) so sessions pack as 8-10, 10-12, 14-16, 16-18 with no
@@ -633,6 +640,7 @@ export async function runAutoScheduler(
 
       if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; continue; }
       if (groups.some(g => !isFree(cohortOcc, g.id, keys))) { rejCohort++; continue; }
+      if (groups.some(g => !leavesLunchFree(cohortOcc, g.id, day, lunchHours, keys))) { rejCohort++; continue; }
       if (!isLab && faculty && wouldCreateLongRun(facultyNonLabOcc, faculty.id, day, keys)) { rejConsec++; continue; }
 
       const pickedRoom = pickRoomFor(keys);
