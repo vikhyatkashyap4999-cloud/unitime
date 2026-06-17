@@ -35,7 +35,7 @@ export interface ConflictDiagnostics {
   rejectedByCohortClash: number;
   rejectedByConsecutiveHours: number;
   rejectedByFixedRoom: number;
-  noRoomAssigned: number;   // placed successfully but without a room
+  rejectedByNoRoom: number;   // rejected because no valid room was available
   suggestions: string[];
 }
 
@@ -288,7 +288,7 @@ function buildDiagnostics(
     rejectedByCohortClash: rejCohort,
     rejectedByConsecutiveHours: rejConsec,
     rejectedByFixedRoom: rejFixedRoom,
-    noRoomAssigned,
+    rejectedByNoRoom: rejNoRoom,
     suggestions,
   };
 }

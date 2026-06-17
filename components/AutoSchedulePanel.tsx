@@ -68,7 +68,7 @@ function downloadConflictReport(unresolved: UnresolvedSession[], termName: strin
       d?.primaryReason ?? u.reason,
       d?.rejectedByFacultyClash ?? '', d?.rejectedByCohortClash ?? '',
       d?.rejectedByConsecutiveHours ?? '', d?.rejectedByFixedRoom ?? '',
-      d?.noRoomAssigned ?? '', d?.totalCandidates ?? '',
+      d?.rejectedByNoRoom ?? '', d?.totalCandidates ?? '',
       d?.suggestions[0] ?? '', d?.suggestions[1] ?? '', d?.suggestions[2] ?? '',
     ];
   });
