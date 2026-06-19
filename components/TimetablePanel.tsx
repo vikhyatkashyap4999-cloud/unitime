@@ -922,4 +922,27 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
   );
 };
 
-export default TimetablePanel;
+// Custom comparator: only re-render when actual data props change.
+// Callback props are intentionally ignored — they are new arrow-function
+// references on every parent render but carry no new information.
+// When `entries` (the schedule) changes, the comparator returns false and
+// the panel re-renders, keeping clash detection and colour overlays live.
+const arePropsEqual = (prev: TimetablePanelProps, next: TimetablePanelProps): boolean =>
+  prev.entries       === next.entries       &&
+  prev.rooms         === next.rooms         &&
+  prev.faculties     === next.faculties     &&
+  prev.groups        === next.groups        &&
+  prev.courses       === next.courses       &&
+  prev.viewType      === next.viewType      &&
+  prev.viewId        === next.viewId        &&
+  prev.activeTermId  === next.activeTermId  &&
+  prev.x             === next.x             &&
+  prev.y             === next.y             &&
+  prev.w             === next.w             &&
+  prev.h             === next.h             &&
+  prev.z             === next.z             &&
+  prev.isMaximized   === next.isMaximized   &&
+  prev.isMobile      === next.isMobile      &&
+  prev.clipboard     === next.clipboard;
+
+export default React.memo(TimetablePanel, arePropsEqual);

@@ -391,7 +391,7 @@ const App: React.FC = () => {
   const [selectedEntry, setSelectedEntry] = useState<ScheduleEntry | null>(null);
   const [selectedCellEntries, setSelectedCellEntries] = useState<ScheduleEntry[]>([]);
 
-  const [maxZ, setMaxZ] = useState(12);
+  const maxZRef = useRef(12);
 
   const handleSaveSession = async (newEntries: Omit<ScheduleEntry, 'id' | 'departmentId'>[]) => {
     pushHistory();
@@ -924,7 +924,7 @@ const App: React.FC = () => {
       { id: 'p4', type: 'Course' as ViewType, viewId: '', x: 820, y: 370, w: 800, h: 350, z: 4 },
     ];
     setPanels(newPanels);
-    setMaxZ(4);
+    maxZRef.current = 4;
     setActiveTab('builder');
   };
 
@@ -1003,9 +1003,8 @@ const App: React.FC = () => {
         y: 50 + (panels.length * 40), 
         w: 800, 
         h: 350, 
-        z: maxZ + 1 
+        z: ++maxZRef.current
       }]);
-      setMaxZ(maxZ + 1);
       setActiveTab('builder');
     }
   };
@@ -1079,8 +1078,7 @@ const App: React.FC = () => {
                         onUpdateView={(type, viewId) => updatePanel(panel.id, { type, viewId })} 
                         onUpdateGeometry={(geom) => updatePanel(panel.id, geom)} 
                         onFocus={() => {
-                          const newZ = maxZ + 1;
-                          setMaxZ(newZ);
+                          const newZ = ++maxZRef.current;
                           updatePanel(panel.id, { z: newZ });
                         }} 
                         onCellClick={(day, time, viewType, viewId) => {
