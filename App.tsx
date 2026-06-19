@@ -22,7 +22,7 @@ import {
   MOCK_TERMS, MOCK_COURSES, MOCK_FACULTY, MOCK_ROOMS, MOCK_GROUPS 
 } from './constants';
 import { 
-  Plus, MapPin, Download, ChevronUp, ChevronDown, Calendar, LayoutGrid, Clock, Undo2, Redo2
+  Plus, MapPin, Download, ChevronUp, ChevronDown, Calendar, LayoutGrid, Clock
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -1064,31 +1064,6 @@ const App: React.FC = () => {
           {activeTab === 'dashboard' && <Dashboard courses={courses} rooms={rooms} groups={groups} schedule={schedule} clashes={clashes} activeTerm={effectiveActiveTerm} faculties={faculties} />}
           {activeTab === 'builder' && (
             <div className="flex flex-col h-full">
-              {/* Undo / Redo toolbar */}
-              <div className="shrink-0 h-9 bg-white border-b border-slate-200 flex items-center px-3 gap-1 z-[500]">
-                <button
-                  onClick={handleUndo}
-                  disabled={!canUndo}
-                  title="Undo (Ctrl+Z)"
-                  className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-bold uppercase tracking-widest border transition-all disabled:opacity-30 disabled:cursor-not-allowed enabled:hover:bg-slate-100"
-                >
-                  <Undo2 className="w-3.5 h-3.5" />
-                  Undo
-                </button>
-                <button
-                  onClick={handleRedo}
-                  disabled={!canRedo}
-                  title="Redo (Ctrl+Y)"
-                  className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-bold uppercase tracking-widest border transition-all disabled:opacity-30 disabled:cursor-not-allowed enabled:hover:bg-slate-100"
-                >
-                  <Redo2 className="w-3.5 h-3.5" />
-                  Redo
-                </button>
-                <div className="w-px h-5 bg-slate-200 mx-1" />
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                  {canUndo ? `${undoStackRef.current.length} step${undoStackRef.current.length !== 1 ? 's' : ''} available` : 'Nothing to undo'}
-                </span>
-              </div>
               <div className="flex-1 relative overflow-auto custom-scrollbar">
                 <div className="min-w-[2500px] min-h-[1500px] relative canvas-workspace">
                   <AnimatePresence>
@@ -1136,6 +1111,10 @@ const App: React.FC = () => {
                         onPasteEntry={(entry) => handleSaveSession([entry])}
                         onCopyToPanel={handleCopyToPanel}
                         onCtrlDragCopy={handleCtrlDragCopy}
+                        onUndo={handleUndo}
+                        onRedo={handleRedo}
+                        canUndo={canUndo}
+                        canRedo={canRedo}
                         isMaximized={maximizedPanelId === panel.id}
                         onMaximize={() => setMaximizedPanelId(maximizedPanelId === panel.id ? null : panel.id)}
                         clipboard={clipboard}

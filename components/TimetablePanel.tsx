@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { DAYS, TIME_SLOTS, TOTAL_WEEKS } from '../constants';
 import { ScheduleEntry, ViewType, Room, Faculty, StudentGroup, Course, DayOfWeek } from '../types';
-import { Minus, Square, X, FolderSync, CalendarCheck, AlertTriangle, Search, ChevronDown, Plus, Calendar, Clock, Zap, Users, User, MapPin } from 'lucide-react';
+import { Minus, Square, X, FolderSync, CalendarCheck, AlertTriangle, Search, ChevronDown, Plus, Calendar, Clock, Zap, Users, User, MapPin, Undo2, Redo2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatTime12h } from '../services/utils';
 
@@ -67,13 +67,18 @@ interface TimetablePanelProps {
   onMaximize?: () => void;
   isMobile?: boolean;
   activeTermId?: string;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
 }
 
 const TimetablePanel: React.FC<TimetablePanelProps> = ({
   id, viewType, viewId, entries, rooms, faculties, groups, courses, x, y, w, h, z,
   onRemove, onUpdateView, onUpdateGeometry, onFocus, onCellClick, onEntryClick,
   onMoveEntry, onDuplicateEntry, onDeleteEntry, onPasteEntry, onCopyToPanel, onCtrlDragCopy,
-  clipboard, setClipboard, isMaximized = false, onMaximize, isMobile = false, activeTermId
+  clipboard, setClipboard, isMaximized = false, onMaximize, isMobile = false, activeTermId,
+  onUndo, onRedo, canUndo = false, canRedo = false
 }) => {
   const theme = TYPE_THEMES[viewType as keyof typeof TYPE_THEMES] ?? TYPE_THEMES.Group;
 
@@ -556,7 +561,24 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
 
         {!isMobile && (
           <div className="flex items-center gap-1.5 ml-4" onMouseDown={e => e.stopPropagation()}>
-            <button 
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              title="Undo (Ctrl+Z)"
+              className="p-1 transition-all rounded-sm border border-transparent hover:bg-white/20 hover:border-white/40 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              title="Redo (Ctrl+Y)"
+              className="p-1 transition-all rounded-sm border border-transparent hover:bg-white/20 hover:border-white/40 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <Redo2 className="w-3.5 h-3.5" />
+            </button>
+            <div className="w-px h-4 bg-white/20 mx-0.5" />
+            <button
               onClick={onMaximize}
               title={isMaximized ? "Restore Size" : "Maximize View"}
               className="p-1 hover:bg-white/20 transition-all rounded-sm border border-transparent hover:border-white/40"
@@ -564,7 +586,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
               <Square className={`w-3.5 h-3.5 ${isMaximized ? 'scale-75' : ''}`} />
             </button>
             <div className="w-px h-4 bg-white/20 mx-0.5" />
-            <button 
+            <button
               onClick={onRemove}
               className="p-1 hover:bg-[#c9302c] transition-all rounded-sm flex items-center justify-center"
             >
@@ -943,6 +965,8 @@ const arePropsEqual = (prev: TimetablePanelProps, next: TimetablePanelProps): bo
   prev.z             === next.z             &&
   prev.isMaximized   === next.isMaximized   &&
   prev.isMobile      === next.isMobile      &&
-  prev.clipboard     === next.clipboard;
+  prev.clipboard     === next.clipboard     &&
+  prev.canUndo       === next.canUndo       &&
+  prev.canRedo       === next.canRedo;
 
 export default React.memo(TimetablePanel, arePropsEqual);
