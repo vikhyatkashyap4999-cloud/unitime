@@ -157,10 +157,23 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
     };
   };
 
+  // Deduplicate clashes that repeat once per week — same session pair = same clash.
+  // Keeps only the first occurrence; removes "(Week 2)", "(Week 3)" duplicates.
+  const deduplicateClashes = (list: Clash[]): Clash[] => {
+    const seen = new Set<string>();
+    return list.filter(c => {
+      const key = `${c.type}~${[...c.affectedIds].sort().join('~')}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   const downloadClashExcel = () => {
-    const cohortClashes = clashes.filter(c => c.type === 'Cohort');
-    const facultyClashes = clashes.filter(c => c.type === 'Faculty');
-    const roomClashes = clashes.filter(c => c.type === 'Room');
+    const dedupedClashes = deduplicateClashes(clashes);
+    const cohortClashes = dedupedClashes.filter(c => c.type === 'Cohort');
+    const facultyClashes = dedupedClashes.filter(c => c.type === 'Faculty');
+    const roomClashes = dedupedClashes.filter(c => c.type === 'Room');
 
     const buildSheet = (clashList: Clash[], extraColLabel: string) => {
       return clashList.map((clash, idx) => {
@@ -186,7 +199,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
       });
     };
 
-    const loadViolations = clashes.filter(c => c.type === 'LoadViolation').map((c, idx) => ({
+    const loadViolations = dedupedClashes.filter(c => c.type === 'LoadViolation').map((c, idx) => ({
       '#': idx + 1,
       'Description': c.message,
     }));
@@ -255,19 +268,25 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
       accentBg: '#ecfeff',
       accentBorder: '#a5f3fc',
       action: () => {
-        const data = getFilteredSchedule().map(s => {
+        const roomStats = new Map<string, { room: Room; totalHours: number; sessions: number; totalStudents: number }>();
+        getFilteredSchedule().forEach(s => {
           const room = rooms.find(r => r.id === s.roomId);
-          const selectedGroups = groups.filter(g => s.groupIds?.includes(g.id));
-          const totalStudents = selectedGroups.reduce((sum, g) => sum + (g.studentCount || 0), 0);
-          const cohortNames = selectedGroups.map(g => g.name).join(', ');
-          return {
-            'Room': room?.name,
-            'Capacity': room?.capacity,
-            'Cohorts': cohortNames,
-            'Total Students': totalStudents,
-            'Utilization %': room ? Math.round(totalStudents / room.capacity * 100) : 0
-          };
+          if (!room) return;
+          const hours = DataService.getDuration(s.startTime, s.endTime);
+          const students = groups.filter(g => s.groupIds?.includes(g.id)).reduce((sum, g) => sum + (g.studentCount || 0), 0);
+          const prev = roomStats.get(room.id) ?? { room, totalHours: 0, sessions: 0, totalStudents: 0 };
+          roomStats.set(room.id, { room, totalHours: prev.totalHours + hours, sessions: prev.sessions + 1, totalStudents: prev.totalStudents + students });
         });
+        const data = Array.from(roomStats.values())
+          .sort((a, b) => b.totalHours - a.totalHours)
+          .map(({ room, totalHours, sessions, totalStudents }) => ({
+            'Room': (room as any)?._unique_name || room.name,
+            'Capacity': room.capacity,
+            'Total Scheduled Hours (per week)': Math.round(totalHours * 10) / 10,
+            'Total Sessions': sessions,
+            'Avg Students per Session': sessions > 0 ? Math.round(totalStudents / sessions) : 0,
+            'Avg Utilization %': room.capacity > 0 && sessions > 0 ? Math.round((totalStudents / sessions) / room.capacity * 100) : 0,
+          }));
         downloadCSV(data, 'Resource_Utilization_Report');
       }
     },
@@ -498,13 +517,15 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
         <div className="mx-2 space-y-3">
           {/* Filter chips */}
           <div className="flex items-center gap-2 flex-wrap">
-            {([
-              { key: 'all', label: `All Clashes`, count: clashes.length },
-              { key: 'Room', label: 'Room', count: clashes.filter(c => c.type === 'Room').length },
-              { key: 'Faculty', label: 'Faculty', count: clashes.filter(c => c.type === 'Faculty').length },
-              { key: 'Cohort', label: 'Cohort', count: clashes.filter(c => c.type === 'Cohort').length },
-              { key: 'LoadViolation', label: 'Load Violations', count: clashes.filter(c => c.type === 'LoadViolation').length },
-            ] as const).map(({ key, label, count }) => (
+            {(() => {
+              const dd = deduplicateClashes(clashes);
+              return ([
+                { key: 'all', label: `All Clashes`, count: dd.length },
+                { key: 'Room', label: 'Room', count: dd.filter(c => c.type === 'Room').length },
+                { key: 'Faculty', label: 'Faculty', count: dd.filter(c => c.type === 'Faculty').length },
+                { key: 'Cohort', label: 'Cohort', count: dd.filter(c => c.type === 'Cohort').length },
+                { key: 'LoadViolation', label: 'Load Violations', count: dd.filter(c => c.type === 'LoadViolation').length },
+              ] as const).map(({ key, label, count }) => (
               <button
                 key={key}
                 onClick={() => setClashTypeFilter(key)}
@@ -520,11 +541,13 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
                   {count}
                 </span>
               </button>
-            ))}
+            ));
+            })()}
           </div>
 
           {(() => {
-            const filtered = clashTypeFilter === 'all' ? clashes : clashes.filter(c => c.type === clashTypeFilter);
+            const dedupedAll = deduplicateClashes(clashes);
+            const filtered = clashTypeFilter === 'all' ? dedupedAll : dedupedAll.filter(c => c.type === clashTypeFilter);
 
             const typeBadge: Record<string, string> = {
               Room: 'bg-red-100 text-red-700 border-red-300',
