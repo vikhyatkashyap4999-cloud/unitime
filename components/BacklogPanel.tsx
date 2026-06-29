@@ -248,15 +248,17 @@ function allocateBacklogs(
     return { mc, clashTotal, clashWith: clashWith.join(', ') };
   });
 
-  // Separate clash-free and has-clash
-  const noClash = scored.filter(s => s.clashTotal === 0);
-  const hasClash = scored.filter(s => s.clashTotal > 0);
+  // Separate clash-free and has-clash, then split each by zero vs non-zero credits
+  const noClash    = scored.filter(s => s.clashTotal === 0 && s.mc.credits > 0);
+  const noClashZero = scored.filter(s => s.clashTotal === 0 && s.mc.credits === 0);
+  const hasClash   = scored.filter(s => s.clashTotal > 0  && s.mc.credits > 0);
+  const hasClashZero = scored.filter(s => s.clashTotal > 0  && s.mc.credits === 0);
 
-  // Knapsack on clash-free courses to maximise credit utilisation
+  // Knapsack on non-zero clash-free courses to maximise credit utilisation
   const noClashPicked = knapsackSelect(noClash.map(s => s.mc.credits), remaining);
   const noClashUsed = noClash.reduce((sum, s, i) => noClashPicked[i] ? sum + s.mc.credits : sum, 0);
 
-  // Greedy fill remaining budget with has-clash courses (secondary)
+  // Greedy fill remaining budget with non-zero has-clash courses (secondary)
   let clashBudgetLeft = remaining - noClashUsed;
   let hasClashUsed = 0;
   const hasClashPicked = hasClash.map(s => {
@@ -270,22 +272,32 @@ function allocateBacklogs(
 
   const totalSem3Used = noClashUsed + hasClashUsed;
 
-  // Output clash-free rows
+  // Helper to push a SELECTED row
+  const pushSelected = (mc: ProgramCourse, clashWith: string, hasClash: boolean) => {
+    const cohorts = cohortsForCourse(mc.course, tt);
+    const rec = bestCohort(mc.course, backlogSessions, tt);
+    rows.push({
+      studentId, studentName, programCode, programName,
+      course: mc.course, credits: mc.credits,
+      source: `Sem ${mainSem} Main`,
+      allocationStatus: hasClash ? 'SELECTED — Has Clashes' : 'SELECTED',
+      targetSemester: mainSem, sem3Total,
+      availableCohorts: cohorts.join(', ') || 'Not in timetable',
+      recommendedCohort: rec || '—', clashWith: clashWith || '—',
+      remarks: hasClash
+        ? `Selected — session clash(es) with backlog; verify cohort`
+        : 'Selected — no clash with backlog sessions',
+    });
+  };
+
+  // 0-credit clash-free → always selected (no budget impact)
+  for (const { mc } of noClashZero) pushSelected(mc, '—', false);
+
+  // Non-zero clash-free → knapsack decision
   for (let i = 0; i < noClash.length; i++) {
     const { mc } = noClash[i];
     if (noClashPicked[i]) {
-      const cohorts = cohortsForCourse(mc.course, tt);
-      const rec = bestCohort(mc.course, backlogSessions, tt);
-      rows.push({
-        studentId, studentName, programCode, programName,
-        course: mc.course, credits: mc.credits,
-        source: `Sem ${mainSem} Main`,
-        allocationStatus: 'SELECTED',
-        targetSemester: mainSem, sem3Total,
-        availableCohorts: cohorts.join(', ') || 'Not in timetable',
-        recommendedCohort: rec || '—', clashWith: '—',
-        remarks: 'Selected — no clash with backlog sessions',
-      });
+      pushSelected(mc, '—', false);
     } else {
       rows.push({
         studentId, studentName, programCode, programName,
@@ -299,7 +311,10 @@ function allocateBacklogs(
     }
   }
 
-  // Output has-clash rows
+  // 0-credit has-clash → always selected (no budget impact)
+  for (const { mc, clashWith } of hasClashZero) pushSelected(mc, clashWith, true);
+
+  // Non-zero has-clash rows
   for (let i = 0; i < hasClash.length; i++) {
     const { mc, clashTotal, clashWith } = hasClash[i];
     if (hasClashPicked[i]) {
