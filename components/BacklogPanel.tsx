@@ -44,6 +44,7 @@ interface OutputRow {
   source: string;
   allocationStatus: string;
   targetSemester: string | number;
+  sem3Total: number;
   availableCohorts: string;
   recommendedCohort: string;
   clashWith: string;
@@ -168,15 +169,37 @@ function bestCohort(courseId: string, avoidSessions: TTSession[], tt: TTSession[
   return cohorts[0];
 }
 
+// 0/1 knapsack — returns boolean[] marking which items to take
+// to maximise total credits within budget
+function knapsackSelect(credits: number[], budget: number): boolean[] {
+  const n = credits.length;
+  const B = Math.max(0, budget);
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(B + 1).fill(0));
+  for (let i = 1; i <= n; i++) {
+    const c = credits[i - 1];
+    for (let w = 0; w <= B; w++) {
+      dp[i][w] = dp[i - 1][w];
+      if (c <= w && dp[i - 1][w - c] + c > dp[i][w]) dp[i][w] = dp[i - 1][w - c] + c;
+    }
+  }
+  const selected = new Array(n).fill(false);
+  let w = B;
+  for (let i = n; i > 0; i--) {
+    if (dp[i][w] !== dp[i - 1][w]) { selected[i - 1] = true; w -= credits[i - 1]; }
+  }
+  return selected;
+}
+
 function allocateBacklogs(
   studentId: string, studentName: string, programCode: string, programName: string,
   backlogs: GradeRow[], mainSem: number,
   programCourses: ProgramCourse[], tt: TTSession[], rows: OutputRow[],
-  budget: number
+  budget: number, sem3Total: number
 ) {
   const backlogCredits = backlogs.reduce((s, g) => s + g.credits, 0);
   const remaining = budget - backlogCredits;
   const backlogSessions: TTSession[] = backlogs.flatMap(bg => sessionsForCourse(bg.course, tt));
+  const budgetInfo = `Sem 3 total: ${sem3Total} cr | Backlog: ${backlogCredits} cr | Available for Sem 3: ${Math.max(0, remaining)} cr`;
 
   for (const bg of backlogs) {
     const cohorts = cohortsForCourse(bg.course, tt);
@@ -188,10 +211,12 @@ function allocateBacklogs(
       course: bg.course, credits: bg.credits,
       source: `Sem ${bg.semester} Backlog`,
       allocationStatus: 'MAPPED — Mandatory',
-      targetSemester: mainSem,
+      targetSemester: mainSem, sem3Total,
       availableCohorts: cohorts.join(', ') || 'Not in timetable',
       recommendedCohort: rec || '—', clashWith: '—',
-      remarks: cohorts.length === 0 ? 'Course not found in timetable — manual mapping needed' : 'Backlog course — mandatory',
+      remarks: cohorts.length === 0
+        ? `Course not found in timetable — manual mapping needed (${budgetInfo})`
+        : `Backlog course — mandatory (${budgetInfo})`,
     });
   }
 
@@ -204,14 +229,15 @@ function allocateBacklogs(
         course: mc.course, credits: mc.credits,
         source: `Sem ${mainSem} Main`,
         allocationStatus: 'NOT MAPPED — Budget Exceeded',
-        targetSemester: mainSem,
+        targetSemester: mainSem, sem3Total,
         availableCohorts: '—', recommendedCohort: '—', clashWith: '—',
-        remarks: `Backlog credits (${backlogCredits}) already reach/exceed budget (${budget}) — Sem ${mainSem} course not mapped`,
+        remarks: `Backlog (${backlogCredits} cr) ≥ budget (${budget} cr) — Sem ${mainSem} course not mapped`,
       });
     }
     return;
   }
 
+  // Score each main course by clash count with backlog sessions
   const scored = mainCourses.map(mc => {
     let clashTotal = 0;
     const clashWith: string[] = [];
@@ -222,37 +248,82 @@ function allocateBacklogs(
     return { mc, clashTotal, clashWith: clashWith.join(', ') };
   });
 
-  scored.sort((a, b) => a.clashTotal - b.clashTotal);
+  // Separate clash-free and has-clash
+  const noClash = scored.filter(s => s.clashTotal === 0);
+  const hasClash = scored.filter(s => s.clashTotal > 0);
 
-  let budgetUsed = 0;
-  for (const { mc, clashTotal, clashWith } of scored) {
-    if (budgetUsed + mc.credits <= remaining) {
+  // Knapsack on clash-free courses to maximise credit utilisation
+  const noClashPicked = knapsackSelect(noClash.map(s => s.mc.credits), remaining);
+  const noClashUsed = noClash.reduce((sum, s, i) => noClashPicked[i] ? sum + s.mc.credits : sum, 0);
+
+  // Greedy fill remaining budget with has-clash courses (secondary)
+  let clashBudgetLeft = remaining - noClashUsed;
+  let hasClashUsed = 0;
+  const hasClashPicked = hasClash.map(s => {
+    if (s.mc.credits <= clashBudgetLeft) {
+      clashBudgetLeft -= s.mc.credits;
+      hasClashUsed += s.mc.credits;
+      return true;
+    }
+    return false;
+  });
+
+  const totalSem3Used = noClashUsed + hasClashUsed;
+
+  // Output clash-free rows
+  for (let i = 0; i < noClash.length; i++) {
+    const { mc } = noClash[i];
+    if (noClashPicked[i]) {
       const cohorts = cohortsForCourse(mc.course, tt);
       const rec = bestCohort(mc.course, backlogSessions, tt);
       rows.push({
         studentId, studentName, programCode, programName,
         course: mc.course, credits: mc.credits,
         source: `Sem ${mainSem} Main`,
-        allocationStatus: clashTotal === 0 ? 'SELECTED' : 'SELECTED — Has Clashes',
-        targetSemester: mainSem,
+        allocationStatus: 'SELECTED',
+        targetSemester: mainSem, sem3Total,
         availableCohorts: cohorts.join(', ') || 'Not in timetable',
-        recommendedCohort: rec || '—',
-        clashWith: clashWith || '—',
-        remarks: clashTotal === 0
-          ? 'Selected — no clash with backlog sessions'
-          : `Selected — ${clashTotal} session clash(es) with backlog; verify cohort`,
+        recommendedCohort: rec || '—', clashWith: '—',
+        remarks: 'Selected — no clash with backlog sessions',
       });
-      budgetUsed += mc.credits;
     } else {
       rows.push({
         studentId, studentName, programCode, programName,
         course: mc.course, credits: mc.credits,
         source: `Sem ${mainSem} Main`,
         allocationStatus: 'NOT MAPPED — Budget Exceeded',
-        targetSemester: mainSem,
-        availableCohorts: '—', recommendedCohort: '—',
-        clashWith: clashWith || '—',
-        remarks: `Budget exhausted (${budget} credit limit: ${backlogCredits} backlog + ${budgetUsed} Sem ${mainSem} used) — not mapped`,
+        targetSemester: mainSem, sem3Total,
+        availableCohorts: '—', recommendedCohort: '—', clashWith: '—',
+        remarks: `Budget exhausted (${budget} limit: ${backlogCredits} backlog + ${totalSem3Used} Sem ${mainSem}) — not mapped`,
+      });
+    }
+  }
+
+  // Output has-clash rows
+  for (let i = 0; i < hasClash.length; i++) {
+    const { mc, clashTotal, clashWith } = hasClash[i];
+    if (hasClashPicked[i]) {
+      const cohorts = cohortsForCourse(mc.course, tt);
+      const rec = bestCohort(mc.course, backlogSessions, tt);
+      rows.push({
+        studentId, studentName, programCode, programName,
+        course: mc.course, credits: mc.credits,
+        source: `Sem ${mainSem} Main`,
+        allocationStatus: 'SELECTED — Has Clashes',
+        targetSemester: mainSem, sem3Total,
+        availableCohorts: cohorts.join(', ') || 'Not in timetable',
+        recommendedCohort: rec || '—', clashWith,
+        remarks: `Selected — ${clashTotal} session clash(es) with backlog; verify cohort`,
+      });
+    } else {
+      rows.push({
+        studentId, studentName, programCode, programName,
+        course: mc.course, credits: mc.credits,
+        source: `Sem ${mainSem} Main`,
+        allocationStatus: 'NOT MAPPED — Budget Exceeded',
+        targetSemester: mainSem, sem3Total,
+        availableCohorts: '—', recommendedCohort: '—', clashWith,
+        remarks: `Budget exhausted (${budget} limit) — not mapped`,
       });
     }
   }
@@ -274,23 +345,24 @@ function computeAll(grades: GradeRow[], programCourses: ProgramCourse[], tt: TTS
     const detained = failureRate >= 0.5;
     const rows: OutputRow[] = [];
 
+    // Pre-calculate Sem 3 total for this program
+    const sem3Credits = programCourses
+      .filter(pc => pc.programCode === first.programCode && pc.semester === 3)
+      .reduce((s, pc) => s + pc.credits, 0);
+
     if (!detained) {
       rows.push({
         studentId: sid, studentName: first.studentName, programCode: first.programCode, programName: first.programName,
         course: '—', credits: 0, source: '—',
-        allocationStatus: 'NOT DETAINED', targetSemester: '—',
+        allocationStatus: 'NOT DETAINED', targetSemester: '—', sem3Total: sem3Credits,
         availableCohorts: '—', recommendedCohort: '—', clashWith: '—',
         remarks: `Failure rate ${(failureRate * 100).toFixed(1)}% < 50% — normal progression`,
       });
     } else {
       const sem1fails = sg.filter(g => g.semester === 1 && g.status === 'FAIL');
       if (sem1fails.length > 0) {
-        // Budget = min(27, sum of all Sem 3 course credits for this program in the master)
-        const sem3Credits = programCourses
-          .filter(pc => pc.programCode === first.programCode && pc.semester === 3)
-          .reduce((s, pc) => s + pc.credits, 0);
         const budget = sem3Credits > 0 ? Math.min(27, sem3Credits) : 27;
-        allocateBacklogs(sid, first.studentName, first.programCode, first.programName, sem1fails, 3, programCourses, tt, rows, budget);
+        allocateBacklogs(sid, first.studentName, first.programCode, first.programName, sem1fails, 3, programCourses, tt, rows, budget, sem3Credits);
       }
     }
 
@@ -356,6 +428,7 @@ function exportResults(summaries: StudentSummary[]) {
     'Source': r.source,
     'Allocation Status': r.allocationStatus,
     'Target Semester': r.targetSemester,
+    'Sem 3 Total Credits (from master)': r.sem3Total || 0,
     'Available Cohorts': r.availableCohorts,
     'Recommended Cohort': r.recommendedCohort,
     'Clash With': r.clashWith,
