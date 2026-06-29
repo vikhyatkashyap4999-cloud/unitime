@@ -24,6 +24,7 @@ interface ProgramCourse {
   semester: number;
   course: string;
   credits: number;
+  semTotalCredits: number;
 }
 
 interface TTSession {
@@ -122,6 +123,7 @@ function parseProgramCourses(rows: Record<string, unknown>[]): ProgramCourse[] {
     semester: parseSem(col(r, 'Semester', 'SEM', 'sem', 'SEMESTER')),
     course: col(r, 'Course', 'COURSE', 'Course ID', 'CourseID', 'course_id', 'Course Code', 'Subject Code', 'Subject'),
     credits: parseFloat(col(r, 'Credits', 'CREDITS', 'Credit', 'credit')) || 0,
+    semTotalCredits: parseFloat(col(r, 'Semester Total Credits', 'SemesterTotalCredits', 'Sem Total Credits', 'Sem Total', 'Total Sem Credits')) || 0,
   }));
 }
 
@@ -170,11 +172,12 @@ function bestCohort(courseId: string, avoidSessions: TTSession[], tt: TTSession[
 
 function allocateBacklogs(
   studentId: string, studentName: string, programCode: string, programName: string,
-  backlogs: GradeRow[], mainSem: number, overflowSem: number,
-  programCourses: ProgramCourse[], tt: TTSession[], rows: OutputRow[]
+  backlogs: GradeRow[], mainSem: number,
+  programCourses: ProgramCourse[], tt: TTSession[], rows: OutputRow[],
+  budget: number
 ) {
   const backlogCredits = backlogs.reduce((s, g) => s + g.credits, 0);
-  const remaining = BUDGET - backlogCredits;
+  const remaining = budget - backlogCredits;
   const backlogSessions: TTSession[] = backlogs.flatMap(bg => sessionsForCourse(bg.course, tt));
 
   for (const bg of backlogs) {
@@ -202,10 +205,10 @@ function allocateBacklogs(
         studentId, studentName, programCode, programName,
         course: mc.course, credits: mc.credits,
         source: `Sem ${mainSem} Main`,
-        allocationStatus: 'DEFERRED',
-        targetSemester: overflowSem,
+        allocationStatus: 'NOT MAPPED — Budget Exceeded',
+        targetSemester: mainSem,
         availableCohorts: '—', recommendedCohort: '—', clashWith: '—',
-        remarks: `Budget full (${backlogCredits} backlog credits ≥ ${BUDGET} limit) — deferred to Sem ${overflowSem}`,
+        remarks: `Backlog credits (${backlogCredits}) already reach/exceed budget (${budget}) — Sem ${mainSem} course not mapped`,
       });
     }
     return;
@@ -247,13 +250,11 @@ function allocateBacklogs(
         studentId, studentName, programCode, programName,
         course: mc.course, credits: mc.credits,
         source: `Sem ${mainSem} Main`,
-        allocationStatus: 'DEFERRED',
-        targetSemester: overflowSem,
+        allocationStatus: 'NOT MAPPED — Budget Exceeded',
+        targetSemester: mainSem,
         availableCohorts: '—', recommendedCohort: '—',
         clashWith: clashWith || '—',
-        remarks: budgetUsed >= remaining
-          ? `Budget exhausted (${BUDGET} credit limit) — deferred to Sem ${overflowSem}`
-          : `Budget + clash constraint — deferred to Sem ${overflowSem}`,
+        remarks: `Budget exhausted (${budget} credit limit: ${backlogCredits} backlog + ${budgetUsed} Sem ${mainSem} used) — not mapped`,
       });
     }
   }
@@ -285,9 +286,13 @@ function computeAll(grades: GradeRow[], programCourses: ProgramCourse[], tt: TTS
       });
     } else {
       const sem1fails = sg.filter(g => g.semester === 1 && g.status === 'FAIL');
-      const sem2fails = sg.filter(g => g.semester === 2 && g.status === 'FAIL');
-      if (sem1fails.length > 0) allocateBacklogs(sid, first.studentName, first.programCode, first.programName, sem1fails, 3, 5, programCourses, tt, rows);
-      if (sem2fails.length > 0) allocateBacklogs(sid, first.studentName, first.programCode, first.programName, sem2fails, 4, 6, programCourses, tt, rows);
+      if (sem1fails.length > 0) {
+        // Budget = min(27, program's Sem 3 total credits as declared in course master)
+        const sem3Rows = programCourses.filter(pc => pc.programCode === first.programCode && pc.semester === 3);
+        const declaredTotal = sem3Rows[0]?.semTotalCredits || 0;
+        const budget = declaredTotal > 0 ? Math.min(27, declaredTotal) : 27;
+        allocateBacklogs(sid, first.studentName, first.programCode, first.programName, sem1fails, 3, programCourses, tt, rows, budget);
+      }
     }
 
     return { studentId: sid, studentName: first.studentName, programCode: first.programCode, programName: first.programName, detained, failureRate, totalCredits, failedCredits, rows };
@@ -327,12 +332,12 @@ function dlTemplate(type: 1 | 2) {
     sheetName = 'Student Grades'; fileName = 'Template_StudentGrades.xlsx';
   } else {
     ws = XLSX.utils.aoa_to_sheet([
-      ['Program Code', 'Program Name', 'Semester', 'Course', 'Credits'],
-      ['BCA', 'Bachelor of Computer Applications', 1, 'MATH101', 4],
-      ['BCA', 'Bachelor of Computer Applications', 1, 'CS101', 3],
-      ['BCA', 'Bachelor of Computer Applications', 2, 'PHYS201', 4],
-      ['BCA', 'Bachelor of Computer Applications', 3, 'DBMS301', 4],
-      ['BCA', 'Bachelor of Computer Applications', 3, 'OS301', 3],
+      ['Program Code', 'Program Name', 'Semester', 'Course', 'Credits', 'Semester Total Credits'],
+      ['BCA', 'Bachelor of Computer Applications', 1, 'MATH101', 4, 20],
+      ['BCA', 'Bachelor of Computer Applications', 1, 'CS101', 3, 20],
+      ['BCA', 'Bachelor of Computer Applications', 2, 'PHYS201', 4, 22],
+      ['BCA', 'Bachelor of Computer Applications', 3, 'DBMS301', 4, 20],
+      ['BCA', 'Bachelor of Computer Applications', 3, 'OS301', 3, 20],
     ]);
     sheetName = 'Program Courses'; fileName = 'Template_ProgramCourseMaster.xlsx';
   }
@@ -549,7 +554,7 @@ const BacklogPanel: React.FC = () => {
             number={2}
             title="Program Course Master"
             description="Full course structure — which courses belong to which program and semester"
-            columns={['Program Code', 'Program Name', 'Semester', 'Course', 'Credits']}
+            columns={['Program Code', 'Program Name', 'Semester', 'Course', 'Credits', 'Semester Total Credits']}
             file={files.f2}
             inputRef={ref2}
             onFileChange={f => setFiles(prev => ({ ...prev, f2: f }))}
