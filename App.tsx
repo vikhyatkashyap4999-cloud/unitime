@@ -15,6 +15,7 @@ import SupabaseSetup from './components/SupabaseSetup';
 import ReportsPanel from './components/ReportsPanel';
 import AutoSchedulePanel from './components/AutoSchedulePanel';
 import RoomAvailabilityTool from './components/RoomAvailabilityTool';
+import BacklogPanel from './components/BacklogPanel';
 import {
   Term, Course, Faculty, Room, StudentGroup, ScheduleEntry, Clash, Role, ViewType, UserAccount, DayOfWeek
 } from './types';
@@ -1137,6 +1138,7 @@ const App: React.FC = () => {
             </div>
           )}
           {activeTab === 'admin' && currentUser.role === Role.SUPER_ADMIN && <AdminPanel users={users} onUpdateUsers={handleUpdateUsers} currentUser={currentUser} schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} onClearSchedule={handleClearSchedule} />}
+          {activeTab === 'backlog' && (currentUser.role !== Role.VIEWER) && <BacklogPanel />}
         </div>
       </main>
 

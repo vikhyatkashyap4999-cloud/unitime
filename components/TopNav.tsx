@@ -56,6 +56,7 @@ const TopNav: React.FC<TopNavProps> = ({
     { id: 'terms', label: 'Academic Terms', roles: [Role.SUPER_ADMIN, Role.ADMIN, Role.SCHEDULER] },
     { id: 'data', label: 'Resources & Data', roles: [Role.SUPER_ADMIN, Role.ADMIN] },
     { id: 'autoschedule', label: 'Auto Scheduler', roles: [Role.SUPER_ADMIN, Role.ADMIN] },
+    { id: 'backlog', label: 'Backlog Analyzer', roles: [Role.SUPER_ADMIN, Role.ADMIN, Role.SCHEDULER] },
     { id: 'admin', label: 'Team Workspace', roles: [Role.SUPER_ADMIN] },
   ];
 
