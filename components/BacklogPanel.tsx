@@ -45,6 +45,7 @@ interface OutputRow {
   allocationStatus: string;
   targetSemester: string | number;
   sem3Total: number;
+  sem3Pending: number;
   availableCohorts: string;
   recommendedCohort: string;
   clashWith: string;
@@ -83,8 +84,17 @@ function parseSem(val: string | number): number {
   return m ? parseInt(m[0]) : 0;
 }
 
+// Supports both 24-hour "HH:MM" (old export format) and 12-hour "H:MMAM/PM"
+// (new UniTime "TT export" format, e.g. "12:00PM", "8:00AM").
 function toMin(t: string): number {
-  const parts = String(t || '').split(':');
+  const s = String(t || '').trim();
+  const ampm = s.match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])$/);
+  if (ampm) {
+    let h = parseInt(ampm[1], 10) % 12;
+    if (/p/i.test(ampm[3])) h += 12;
+    return h * 60 + parseInt(ampm[2], 10);
+  }
+  const parts = s.split(':');
   return (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0);
 }
 
@@ -126,17 +136,63 @@ function parseProgramCourses(rows: Record<string, unknown>[]): ProgramCourse[] {
   }));
 }
 
+// Pulls all "Course 1".."Course N" (or "Cohort 1".."Cohort N") columns from a row,
+// in numeric order, ignoring anything blank. A bare "Course"/"Cohort" column
+// (no trailing number) also matches — this is what the OLD single-column export
+// format uses, so both formats flow through the same extraction path.
+function extractIndexed(row: Record<string, unknown>, prefix: string): string[] {
+  const re = new RegExp(`^${prefix}\\s*\\d*$`, 'i');
+  const keys = Object.keys(row).filter(k => re.test(k.trim()));
+  keys.sort((a, b) => {
+    const na = parseInt(a.match(/\d+/)?.[0] || '1', 10);
+    const nb = parseInt(b.match(/\d+/)?.[0] || '1', 10);
+    return na - nb;
+  });
+  return keys.map(k => String(row[k] ?? '').trim()).filter(Boolean);
+}
+
+// New "TT export" format has one row per individual calendar occurrence (a
+// term's worth of the same weekly slot repeated ~20x) plus up to 10 Course /
+// Cohort columns per row (multiple cohorts sharing one combined session).
+// This melts each row into one TTSession per (course, cohort) pair and dedupes
+// on (day, start, end, course, cohort) so clash-checking doesn't run on
+// 100k+ redundant rows.
 function parseTimetable(rows: Record<string, unknown>[]): TTSession[] {
-  return rows
-    .filter(r => col(r, '_day_of_week', 'Day', 'day', 'DAY'))
-    .map(r => ({
-      day: col(r, '_day_of_week', 'Day', 'day').toLowerCase(),
-      startMin: toMin(col(r, '_start_time', 'Start Time', 'startTime', 'start', 'From', 'Start')),
-      endMin: toMin(col(r, '_end_time', 'End Time', 'endTime', 'end', 'To', 'End')),
-      moduleId: normalId(col(r, 'Module Unique ID', '_module_id', 'ModuleID', 'Module ID', 'Course', 'Course ID', 'CourseID', 'Subject Code', 'Module')),
-      cohort: col(r, 'Cohort', 'cohort', 'Group', 'group', 'COHORT', 'Student Group', 'Batch'),
-    }))
-    .filter(s => s.day && s.endMin > s.startMin && s.moduleId);
+  const seen = new Set<string>();
+  const sessions: TTSession[] = [];
+
+  for (const r of rows) {
+    const day = col(r, '_day_of_week', 'Day Of The Week', 'Day', 'day', 'DAY').toLowerCase();
+    const startMin = toMin(col(r, '_start_time', 'Start Time', 'startTime', 'start', 'From', 'Start'));
+    const endMin = toMin(col(r, '_end_time', 'End Time', 'endTime', 'end', 'To', 'End'));
+    if (!day || !(endMin > startMin)) continue;
+
+    let courses = extractIndexed(r, 'course');
+    if (courses.length === 0) {
+      const single = col(r, 'Module Unique ID', '_module_id', 'ModuleID', 'Module ID', 'Course ID', 'CourseID', 'Subject Code', 'Module');
+      if (single) courses = [single];
+    }
+    if (courses.length === 0) continue;
+
+    let cohorts = extractIndexed(r, 'cohort');
+    if (cohorts.length === 0) {
+      const single = col(r, 'Group', 'group', 'Student Group', 'Batch');
+      cohorts = single ? [single] : [''];
+    }
+
+    for (const courseVal of courses) {
+      const moduleId = normalId(courseVal);
+      if (!moduleId) continue;
+      for (const cohort of cohorts) {
+        const key = `${day}|${startMin}|${endMin}|${moduleId}|${cohort}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        sessions.push({ day, startMin, endMin, moduleId, cohort });
+      }
+    }
+  }
+
+  return sessions;
 }
 
 // ─── Core algorithm ───────────────────────────────────────────────────────────
@@ -196,6 +252,10 @@ function allocateBacklogs(
   programCourses: ProgramCourse[], tt: TTSession[], rows: OutputRow[],
   budget: number, sem3Total: number
 ) {
+  // Buffered locally so every row for this student (including the mandatory
+  // backlog rows above) can carry the final sem3Pending figure, which is only
+  // known once all Sem-3 main-course decisions below are made.
+  const myRows: OutputRow[] = [];
   const backlogCredits = backlogs.reduce((s, g) => s + g.credits, 0);
   const remaining = budget - backlogCredits;
   const backlogSessions: TTSession[] = backlogs.flatMap(bg => sessionsForCourse(bg.course, tt));
@@ -206,12 +266,12 @@ function allocateBacklogs(
     const mySessions = sessionsForCourse(bg.course, tt);
     const otherBacklogSessions = backlogSessions.filter(s => !mySessions.includes(s));
     const rec = bestCohort(bg.course, otherBacklogSessions, tt);
-    rows.push({
+    myRows.push({
       studentId, studentName, programCode, programName,
       course: bg.course, credits: bg.credits,
       source: `Sem ${bg.semester} Backlog`,
       allocationStatus: 'MAPPED — Mandatory',
-      targetSemester: mainSem, sem3Total,
+      targetSemester: mainSem, sem3Total, sem3Pending: 0,
       availableCohorts: cohorts.join(', ') || 'Not in timetable',
       recommendedCohort: rec || '—', clashWith: '—',
       remarks: cohorts.length === 0
@@ -221,127 +281,100 @@ function allocateBacklogs(
   }
 
   const mainCourses = programCourses.filter(pc => pc.programCode === programCode && pc.semester === mainSem);
+  let sem3MappedCredits = 0;
 
   if (remaining <= 0) {
     for (const mc of mainCourses) {
-      rows.push({
+      myRows.push({
         studentId, studentName, programCode, programName,
         course: mc.course, credits: mc.credits,
         source: `Sem ${mainSem} Main`,
         allocationStatus: 'NOT MAPPED — Budget Exceeded',
-        targetSemester: mainSem, sem3Total,
+        targetSemester: mainSem, sem3Total, sem3Pending: 0,
         availableCohorts: '—', recommendedCohort: '—', clashWith: '—',
         remarks: `Backlog (${backlogCredits} cr) ≥ budget (${budget} cr) — Sem ${mainSem} course not mapped`,
       });
     }
-    return;
-  }
-
-  // Score each main course by clash count with backlog sessions
-  const scored = mainCourses.map(mc => {
-    let clashTotal = 0;
-    const clashWith: string[] = [];
-    for (const bg of backlogs) {
-      const cnt = clashCountBetween(mc.course, bg.course, tt);
-      if (cnt > 0) { clashTotal += cnt; clashWith.push(`${bg.course}(${cnt})`); }
-    }
-    return { mc, clashTotal, clashWith: clashWith.join(', ') };
-  });
-
-  // Separate clash-free and has-clash, then split each by zero vs non-zero credits
-  const noClash    = scored.filter(s => s.clashTotal === 0 && s.mc.credits > 0);
-  const noClashZero = scored.filter(s => s.clashTotal === 0 && s.mc.credits === 0);
-  const hasClash   = scored.filter(s => s.clashTotal > 0  && s.mc.credits > 0);
-  const hasClashZero = scored.filter(s => s.clashTotal > 0  && s.mc.credits === 0);
-
-  // Knapsack on non-zero clash-free courses to maximise credit utilisation
-  const noClashPicked = knapsackSelect(noClash.map(s => s.mc.credits), remaining);
-  const noClashUsed = noClash.reduce((sum, s, i) => noClashPicked[i] ? sum + s.mc.credits : sum, 0);
-
-  // Greedy fill remaining budget with non-zero has-clash courses (secondary)
-  let clashBudgetLeft = remaining - noClashUsed;
-  let hasClashUsed = 0;
-  const hasClashPicked = hasClash.map(s => {
-    if (s.mc.credits <= clashBudgetLeft) {
-      clashBudgetLeft -= s.mc.credits;
-      hasClashUsed += s.mc.credits;
-      return true;
-    }
-    return false;
-  });
-
-  const totalSem3Used = noClashUsed + hasClashUsed;
-
-  // Helper to push a SELECTED row
-  const pushSelected = (mc: ProgramCourse, clashWith: string, hasClash: boolean) => {
-    const cohorts = cohortsForCourse(mc.course, tt);
-    const rec = bestCohort(mc.course, backlogSessions, tt);
-    rows.push({
-      studentId, studentName, programCode, programName,
-      course: mc.course, credits: mc.credits,
-      source: `Sem ${mainSem} Main`,
-      allocationStatus: hasClash ? 'SELECTED — Has Clashes' : 'SELECTED',
-      targetSemester: mainSem, sem3Total,
-      availableCohorts: cohorts.join(', ') || 'Not in timetable',
-      recommendedCohort: rec || '—', clashWith: clashWith || '—',
-      remarks: hasClash
-        ? `Selected — session clash(es) with backlog; verify cohort`
-        : 'Selected — no clash with backlog sessions',
+  } else {
+    // Score each main course by clash count with backlog sessions
+    const scored = mainCourses.map(mc => {
+      let clashTotal = 0;
+      const clashWith: string[] = [];
+      for (const bg of backlogs) {
+        const cnt = clashCountBetween(mc.course, bg.course, tt);
+        if (cnt > 0) { clashTotal += cnt; clashWith.push(`${bg.course}(${cnt})`); }
+      }
+      return { mc, clashTotal, clashWith: clashWith.join(', ') };
     });
-  };
 
-  // 0-credit clash-free → always selected (no budget impact)
-  for (const { mc } of noClashZero) pushSelected(mc, '—', false);
+    // Only clash-free courses are eligible for selection — a course clashing
+    // with ANY backlog session is never mapped, regardless of budget headroom.
+    const noClash     = scored.filter(s => s.clashTotal === 0 && s.mc.credits > 0);
+    const noClashZero = scored.filter(s => s.clashTotal === 0 && s.mc.credits === 0);
+    const hasClash    = scored.filter(s => s.clashTotal > 0);
 
-  // Non-zero clash-free → knapsack decision
-  for (let i = 0; i < noClash.length; i++) {
-    const { mc } = noClash[i];
-    if (noClashPicked[i]) {
-      pushSelected(mc, '—', false);
-    } else {
-      rows.push({
-        studentId, studentName, programCode, programName,
-        course: mc.course, credits: mc.credits,
-        source: `Sem ${mainSem} Main`,
-        allocationStatus: 'NOT MAPPED — Budget Exceeded',
-        targetSemester: mainSem, sem3Total,
-        availableCohorts: '—', recommendedCohort: '—', clashWith: '—',
-        remarks: `Budget exhausted (${budget} limit: ${backlogCredits} backlog + ${totalSem3Used} Sem ${mainSem}) — not mapped`,
-      });
-    }
-  }
+    // Knapsack on non-zero clash-free courses to maximise credit utilisation
+    // within the remaining budget.
+    const noClashPicked = knapsackSelect(noClash.map(s => s.mc.credits), remaining);
+    const noClashUsed = noClash.reduce((sum, s, i) => noClashPicked[i] ? sum + s.mc.credits : sum, 0);
+    sem3MappedCredits = noClashZero.reduce((s, x) => s + x.mc.credits, 0) + noClashUsed;
 
-  // 0-credit has-clash → always selected (no budget impact)
-  for (const { mc, clashWith } of hasClashZero) pushSelected(mc, clashWith, true);
-
-  // Non-zero has-clash rows
-  for (let i = 0; i < hasClash.length; i++) {
-    const { mc, clashTotal, clashWith } = hasClash[i];
-    if (hasClashPicked[i]) {
+    const pushSelected = (mc: ProgramCourse) => {
       const cohorts = cohortsForCourse(mc.course, tt);
       const rec = bestCohort(mc.course, backlogSessions, tt);
-      rows.push({
+      myRows.push({
         studentId, studentName, programCode, programName,
         course: mc.course, credits: mc.credits,
         source: `Sem ${mainSem} Main`,
-        allocationStatus: 'SELECTED — Has Clashes',
-        targetSemester: mainSem, sem3Total,
+        allocationStatus: 'SELECTED',
+        targetSemester: mainSem, sem3Total, sem3Pending: 0,
         availableCohorts: cohorts.join(', ') || 'Not in timetable',
-        recommendedCohort: rec || '—', clashWith,
-        remarks: `Selected — ${clashTotal} session clash(es) with backlog; verify cohort`,
+        recommendedCohort: rec || '—', clashWith: '—',
+        remarks: 'Selected — no clash with backlog sessions',
       });
-    } else {
-      rows.push({
+    };
+
+    // 0-credit clash-free → always selected (no budget impact)
+    for (const { mc } of noClashZero) pushSelected(mc);
+
+    // Non-zero clash-free → knapsack decision
+    for (let i = 0; i < noClash.length; i++) {
+      const { mc } = noClash[i];
+      if (noClashPicked[i]) {
+        pushSelected(mc);
+      } else {
+        myRows.push({
+          studentId, studentName, programCode, programName,
+          course: mc.course, credits: mc.credits,
+          source: `Sem ${mainSem} Main`,
+          allocationStatus: 'NOT MAPPED — Budget Exceeded',
+          targetSemester: mainSem, sem3Total, sem3Pending: 0,
+          availableCohorts: '—', recommendedCohort: '—', clashWith: '—',
+          remarks: `Budget exhausted (${budget} limit: ${backlogCredits} backlog + ${sem3MappedCredits} Sem ${mainSem}) — not mapped`,
+        });
+      }
+    }
+
+    // Clashing courses (any credit) are never selected — reported so it can be checked manually.
+    for (const { mc, clashWith } of hasClash) {
+      myRows.push({
         studentId, studentName, programCode, programName,
         course: mc.course, credits: mc.credits,
         source: `Sem ${mainSem} Main`,
-        allocationStatus: 'NOT MAPPED — Budget Exceeded',
-        targetSemester: mainSem, sem3Total,
+        allocationStatus: 'NOT MAPPED — Clash',
+        targetSemester: mainSem, sem3Total, sem3Pending: 0,
         availableCohorts: '—', recommendedCohort: '—', clashWith,
-        remarks: `Budget exhausted (${budget} limit) — not mapped`,
+        remarks: `Clashes with backlog course(s) ${clashWith} — not selected; verify manually`,
       });
     }
   }
+
+  // How many of the program's Sem-3 credits are still uncovered (dropped for
+  // clashing or for not fitting the budget) — same value repeated on every
+  // row for this student so it's scannable/filterable in Excel.
+  const sem3Pending = Math.max(0, sem3Total - sem3MappedCredits);
+  myRows.forEach(r => { r.sem3Pending = sem3Pending; });
+  rows.push(...myRows);
 }
 
 function computeAll(grades: GradeRow[], programCourses: ProgramCourse[], tt: TTSession[]): StudentSummary[] {
@@ -369,7 +402,7 @@ function computeAll(grades: GradeRow[], programCourses: ProgramCourse[], tt: TTS
       rows.push({
         studentId: sid, studentName: first.studentName, programCode: first.programCode, programName: first.programName,
         course: '—', credits: 0, source: '—',
-        allocationStatus: 'NOT DETAINED', targetSemester: '—', sem3Total: sem3Credits,
+        allocationStatus: 'NOT DETAINED', targetSemester: '—', sem3Total: sem3Credits, sem3Pending: 0,
         availableCohorts: '—', recommendedCohort: '—', clashWith: '—',
         remarks: `Failure rate ${(failureRate * 100).toFixed(1)}% < 50% — normal progression`,
       });
@@ -396,6 +429,48 @@ function readFirstSheet(file: File): Promise<Record<string, unknown>[]> {
         const wb = XLSX.read(data, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         resolve(XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, unknown>[]);
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// The new UniTime "TT export" report has a metadata block (Report Name,
+// Requested By, date range, …) before the real header row, unlike the old
+// timetable export where headers sit on row 1. This scans the first rows for
+// the header (the "Day"/"Day Of The Week" column is unambiguous — data rows
+// contain an actual day name like "Wednesday", never the literal header text)
+// and builds row objects from whatever row it lands on, so old-format files
+// (header already on row 1) still work unchanged.
+function findHeaderRowIndex(rows: unknown[][]): number {
+  const dayTokens = ['day of the week', '_day_of_week', 'day', 'day_of_week'];
+  for (let i = 0; i < Math.min(rows.length, 30); i++) {
+    const row = rows[i] || [];
+    if (row.some(cell => dayTokens.includes(String(cell ?? '').trim().toLowerCase()))) return i;
+  }
+  return 0;
+}
+
+function readTimetableSheet(file: File): Promise<Record<string, unknown>[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const data = new Uint8Array(e.target!.result as ArrayBuffer);
+        const wb = XLSX.read(data, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][];
+        const headerIdx = findHeaderRowIndex(raw);
+        const headers = (raw[headerIdx] || []).map(h => String(h ?? '').trim());
+        const objs = raw.slice(headerIdx + 1)
+          .filter(r => r.some(c => c !== '' && c !== null && c !== undefined))
+          .map(r => {
+            const obj: Record<string, unknown> = {};
+            headers.forEach((h, i) => { if (h) obj[h] = r[i]; });
+            return obj;
+          });
+        resolve(objs);
       } catch (err) { reject(err); }
     };
     reader.onerror = reject;
@@ -444,6 +519,7 @@ function exportResults(summaries: StudentSummary[]) {
     'Allocation Status': r.allocationStatus,
     'Target Semester': r.targetSemester,
     'Sem 3 Total Credits (from master)': r.sem3Total || 0,
+    'Sem 3 Credits Pending': r.sem3Pending || 0,
     'Available Cohorts': r.availableCohorts,
     'Recommended Cohort': r.recommendedCohort,
     'Clash With': r.clashWith,
@@ -571,7 +647,7 @@ const BacklogPanel: React.FC = () => {
       const [raw1, raw2, raw3] = await Promise.all([
         readFirstSheet(files.f1),
         readFirstSheet(files.f2),
-        readFirstSheet(files.f3),
+        readTimetableSheet(files.f3),
       ]);
       if (raw1.length === 0) throw new Error('Sheet 1 (Student Grades) is empty or unreadable.');
       if (raw2.length === 0) throw new Error('Sheet 2 (Program Course Master) is empty or unreadable.');
@@ -620,7 +696,8 @@ const BacklogPanel: React.FC = () => {
             Upload 3 files → click Generate → download the allocation report.
             The tool identifies detained students (≥ 50% of Sem 1 + Sem 2 credits failed),
             maps backlog courses first (mandatory, within 27-credit budget per semester),
-            then fills remaining budget with current semester courses — prioritising clash-free options.{' '}
+            then fills remaining budget using only Sem 3 courses that have <strong>no session clash</strong> with the backlog —
+            any clashing course is excluded and reported so it can be checked manually.{' '}
             <strong>This tool is read-only and does not modify any timetable data.</strong>
           </div>
         </div>
@@ -650,13 +727,13 @@ const BacklogPanel: React.FC = () => {
           <UploadCard
             number={3}
             title="Combined Timetable"
-            description="Merged timetable export from both UniTime deployments in one sheet"
-            columns={['_day_of_week', '_start_time', '_end_time', 'Module Unique ID', 'Cohort']}
+            description="UniTime 'TT export' report — the header row and metadata block are detected automatically"
+            columns={['Day Of The Week', 'Start Time', 'End Time', 'Course 1', 'Cohort 1']}
             file={files.f3}
             inputRef={ref3}
             onFileChange={f => setFiles(prev => ({ ...prev, f3: f }))}
             onDownloadTemplate={null}
-            footerNote="Go to Reports → Export Excel in each deployment, then copy all rows into one combined sheet."
+            footerNote="Upload the raw TT export report — no need to reformat or strip the report header rows."
           />
         </div>
 
