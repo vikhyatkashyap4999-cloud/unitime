@@ -18,8 +18,17 @@ export const COLORS = {
   success: '#10b981',
 };
 
+// TEMPORARY: the active entry's id/name/dates are kept in sync with the real
+// active term row in Supabase ('Jul-Dec 2026'). This fallback is what the app
+// uses before real term data has loaded (cold start, brief network hiccup, or
+// a Supabase outage) — if it ever disagrees with the real active term, dataService's
+// auto-migration heuristic in fetchTable() sees "few rows under the term I think
+// is active" and bulk-rewrites the whole table to match its (wrong) guess. Keeping
+// this constant identical to whatever term is really active prevents that mismatch.
+// This is a stopgap, not a fix — update this the moment a new term goes active,
+// until the auto-migration heuristic itself is made safe to remove/tighten.
 export const MOCK_TERMS: Term[] = [
-  { id: 't1', name: 'Fall Semester 2024', startDate: '2024-09-01', endDate: '2024-12-20', academicYear: '2024/25', isActive: true },
+  { id: 'Jul-Dec 2026', name: 'Jul-Dec 2026', startDate: '2026-07-01', endDate: '2026-12-31', academicYear: '2026-2027', isActive: true },
   { id: 't2', name: 'Spring Semester 2025', startDate: '2025-01-15', endDate: '2025-05-30', academicYear: '2024/25', isActive: false },
 ];
 
