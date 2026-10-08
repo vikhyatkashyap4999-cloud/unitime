@@ -190,75 +190,140 @@ const App: React.FC = () => {
     };
     loadData();
 
-    // Real-time Multi-user Synchronization — Debounced to avoid "vanishing" data race conditions.
+    // ── Real-time multi-user sync ───────────────────────────────────────────────
+    // Supabase pushes a message the moment any row changes. For the schedule (the
+    // busy table) the changed row is applied straight from that message — nothing
+    // is re-downloaded. Tables that change rarely still refetch, debounced.
+    // All callbacks read refs (activeTermIdRef, scheduleRef) at the moment they
+    // fire, never values captured when this effect first ran.
     if (supabase) {
-      // ✅ FIX: All callbacks read activeTermIdRef.current at the time they fire,
-      // NOT the stale value captured when the effect first ran (which was the mock termId).
-      // Per-table debounce timers — a change to 'schedule' won't delay a refresh of 'courses'.
       const debounceTimers: Record<string, any> = {};
-      const debouncedRefresh = (tableName: string, refreshFn: () => Promise<void>) => {
+      // Debounced refetch of one table. If this tab is mid-write, retry shortly
+      // instead of skipping: with no 30-second poll any more, a skipped refresh
+      // would otherwise go unnoticed until the 15-minute safety net.
+      const debouncedRefresh = (tableName: string, refreshFn: () => Promise<void>, delay = 5000) => {
         if (debounceTimers[tableName]) clearTimeout(debounceTimers[tableName]);
-        // 5s debounce — gives bulk writes time to finish before re-reading.
-        // Also skips entirely if we're actively writing (isSyncingRef) or
-        // within the 10s post-write guard window.
         debounceTimers[tableName] = setTimeout(async () => {
           if (isSyncingRef.current || DataService.isWithinWriteGuard()) {
-            console.log(`[RT] Skipping ${tableName} refresh — write guard active`);
+            debouncedRefresh(tableName, refreshFn, 10000);
             return;
           }
           await refreshFn();
-        }, 5000);
+        }, delay);
       };
 
-      // ── Realtime callbacks use Supabase-only reads (no localStorage fallback). ──
-      // If Supabase is temporarily unavailable the method returns null and we skip
-      // the state update — current state stays intact.
+      const refetchSchedule = () => debouncedRefresh('schedule', async () => {
+        const s = await DataService.fetchTable<ScheduleEntry>('schedule', activeTermIdRef.current);
+        if (s !== null) setScheduleAndRef(s);
+      });
+
+      // Realtime can deliver Postgres arrays either as JSON arrays or as "{a,b}" text.
+      const toList = (v: any): string[] => {
+        if (Array.isArray(v)) return v.map(String);
+        if (typeof v === 'string') {
+          const inner = v.replace(/^\{|\}$/g, '');
+          return inner ? inner.split(',').map(s => s.replace(/^"|"$/g, '').trim()) : [];
+        }
+        return [];
+      };
+
+      // Schedule changes are held for a moment and applied together in one state
+      // update, so a burst of edits causes one redraw rather than one per row.
+      // A very large burst (bulk import / restore / clear) is cheaper to refetch
+      // once than to replay row by row — and also covers any messages Supabase
+      // drops under that kind of load.
+      const SCHEDULE_BURST_LIMIT = 200;
+      let pendingSchedule: { id: string; row: ScheduleEntry | null }[] = [];
+      let scheduleFlushTimer: any = null;
+
+      const flushSchedule = () => {
+        scheduleFlushTimer = null;
+        const batch = pendingSchedule;
+        pendingSchedule = [];
+        if (batch.length === 0) return;
+        if (batch.length > SCHEDULE_BURST_LIMIT) { refetchSchedule(); return; }
+        const termId = activeTermIdRef.current;
+        const byId = new Map<string, ScheduleEntry>(scheduleRef.current.map(e => [e.id, e] as [string, ScheduleEntry]));
+        for (const { id, row } of batch) {
+          // Deleted, or now belongs to a term other than the one on screen.
+          if (!row || (termId && row.termId !== termId)) byId.delete(id);
+          else byId.set(id, row);
+        }
+        setScheduleAndRef(Array.from(byId.values()));
+      };
+
+      const onScheduleChange = (payload: any) => {
+        const isDelete = payload.eventType === 'DELETE';
+        const rec = isDelete ? payload.old : payload.new;
+        const id: string | undefined = rec?.id;
+        // Ignore the echo of this tab's own write — it already has that data.
+        if (!id || DataService.isRecentLocalWrite('schedule', id)) return;
+        const row: ScheduleEntry | null = isDelete ? null : {
+          ...rec,
+          groupIds: toList(rec.groupIds),
+          weeks: toList(rec.weeks).map(Number).filter(n => !isNaN(n)),
+        };
+        pendingSchedule.push({ id, row });
+        if (!scheduleFlushTimer) scheduleFlushTimer = setTimeout(flushSchedule, 300);
+      };
+
+      // Users, terms and the course/faculty/room/cohort registries change rarely
+      // (uploads, admin edits), so a debounced refetch of that one table is fine.
+      // Echoes of this tab's own writes don't trigger a refetch.
+      const onTableChange = (tableName: string, refreshFn: () => Promise<void>) => (payload: any) => {
+        const id = payload.new?.id ?? payload.old?.id;
+        if (DataService.isRecentLocalWrite(tableName, id)) return;
+        debouncedRefresh(tableName, refreshFn);
+      };
+
+      // If the connection drops (laptop sleep, Wi-Fi blip), changes made meanwhile
+      // are never pushed to us — so after reconnecting, catch up with one full refresh.
+      let hasSubscribed = false;
+      let connectionLost = false;
+
       const channel = supabase.channel('realtime_sync')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
-          debouncedRefresh('schedule', async () => {
-            const s = await DataService.fetchTable<ScheduleEntry>('schedule', activeTermIdRef.current);
-            if (s !== null) setScheduleAndRef(s);
-          });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, async () => {
-          debouncedRefresh('users', async () => {
-            const u = await DataService.fetchTable<UserAccount>('users');
-            if (u !== null && u.length > 0) setUsers(u);
-          });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'terms' }, async () => {
-          debouncedRefresh('terms', async () => {
-            const t = await DataService.fetchTable<Term>('terms');
-            if (t !== null && t.length > 0) setTerms(t);
-          });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, async () => {
-          debouncedRefresh('courses', async () => {
-            const c = await DataService.fetchTable<Course>('courses', activeTermIdRef.current);
-            if (c !== null) setCourses(c);
-          });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' }, async () => {
-          debouncedRefresh('faculties', async () => {
-            const f = await DataService.fetchTable<Faculty>('faculties', activeTermIdRef.current);
-            if (f !== null) setFaculties(f);
-          });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, async () => {
-          debouncedRefresh('rooms', async () => {
-            const r = await DataService.fetchTable<Room>('rooms', activeTermIdRef.current);
-            if (r !== null) setRooms(r);
-          });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, async () => {
-          debouncedRefresh('groups', async () => {
-            const g = await DataService.fetchTable<StudentGroup>('groups', activeTermIdRef.current);
-            if (g !== null) setGroups(g);
-          });
-        })
-        .subscribe();
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, onScheduleChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, onTableChange('users', async () => {
+          const u = await DataService.fetchTable<UserAccount>('users');
+          if (u !== null && u.length > 0) setUsers(u);
+        }))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'terms' }, onTableChange('terms', async () => {
+          const t = await DataService.fetchTable<Term>('terms');
+          if (t !== null && t.length > 0) setTerms(t);
+        }))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, onTableChange('courses', async () => {
+          const c = await DataService.fetchTable<Course>('courses', activeTermIdRef.current);
+          if (c !== null) setCourses(c);
+        }))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' }, onTableChange('faculties', async () => {
+          const f = await DataService.fetchTable<Faculty>('faculties', activeTermIdRef.current);
+          if (f !== null) setFaculties(f);
+        }))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, onTableChange('rooms', async () => {
+          const r = await DataService.fetchTable<Room>('rooms', activeTermIdRef.current);
+          if (r !== null) setRooms(r);
+        }))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, onTableChange('groups', async () => {
+          const g = await DataService.fetchTable<StudentGroup>('groups', activeTermIdRef.current);
+          if (g !== null) setGroups(g);
+        }))
+        .subscribe((rawStatus) => {
+          const status = String(rawStatus);
+          if (status === 'SUBSCRIBED') {
+            if (hasSubscribed && connectionLost) {
+              console.log('[RT] Reconnected — catching up with a full refresh');
+              requestFullRefresh();
+            }
+            hasSubscribed = true;
+            connectionLost = false;
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            connectionLost = true;
+          }
+        });
 
       return () => {
+        Object.values(debounceTimers).forEach(t => clearTimeout(t));
+        if (scheduleFlushTimer) clearTimeout(scheduleFlushTimer);
         supabase.removeChannel(channel);
       };
     }
@@ -316,14 +381,17 @@ const App: React.FC = () => {
     return () => { window.removeEventListener('mousemove', handler); cancelAnimationFrame(rafId); };
   }, [activeTab]);
 
-  // Safety-net: reload all data every 30 seconds and on window focus.
-  // CRITICAL: Skips refresh if a write just happened (write guard) to prevent
-  // a read-before-commit from wiping freshly uploaded data.
-  const refreshAllData = async () => {
-    if (!supabase) return;
+  // Full reload of every table. This used to run every 30 seconds and on every
+  // window focus, in every open tab — the main cause of the Supabase egress limit.
+  // Live edits now arrive through realtime instead, so this only runs when it's
+  // genuinely needed (see the effect below). Skips — and returns false — if this
+  // tab just wrote data, since a read right now could miss a write that's still
+  // committing and wipe it from the screen.
+  const refreshAllData = async (): Promise<boolean> => {
+    if (!supabase) return false;
     if (isSyncingRef.current || DataService.isWithinWriteGuard()) {
       console.log('[App] refreshAllData skipped — write guard active');
-      return;
+      return false;
     }
     const termId = activeTermIdRef.current;
     try {
@@ -348,15 +416,51 @@ const App: React.FC = () => {
     } catch (err) {
       console.error('[App] refreshAllData failed:', err);
     }
+    return true;
   };
 
+  // For moments when we know changes may have been missed (reconnect, returning
+  // to the tab): if this tab is mid-write, try again shortly instead of giving up.
+  const fullRefreshRetryRef = useRef<any>(null);
+  const requestFullRefresh = async () => {
+    if (fullRefreshRetryRef.current) {
+      clearTimeout(fullRefreshRetryRef.current);
+      fullRefreshRetryRef.current = null;
+    }
+    const ran = await refreshAllData();
+    if (!ran && supabase) fullRefreshRetryRef.current = setTimeout(requestFullRefresh, 10000);
+  };
+
+  // When a full refresh happens now (instead of every 30 seconds):
+  //  • Coming back to the tab after 3+ minutes away. Shorter absences don't need
+  //    it — realtime keeps delivering changes to background tabs. Longer ones do,
+  //    because browsers throttle background tabs and the connection can lapse.
+  //  • After the realtime connection drops and reconnects (handled above).
+  //  • A slow 15-minute safety net while the tab is on screen, in case a single
+  //    realtime message was ever missed. Hidden tabs skip it entirely.
   useEffect(() => {
     if (!supabase) return;
-    const interval = setInterval(refreshAllData, 30000);
-    window.addEventListener('focus', refreshAllData);
+    const AWAY_REFRESH_MS = 3 * 60 * 1000;
+    const SAFETY_NET_MS = 15 * 60 * 1000;
+    let hiddenSince: number | null = document.visibilityState === 'hidden' ? Date.now() : null;
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenSince = Date.now();
+      } else {
+        if (hiddenSince !== null && Date.now() - hiddenSince >= AWAY_REFRESH_MS) requestFullRefresh();
+        hiddenSince = null;
+      }
+    };
+    const safetyNet = setInterval(() => {
+      if (document.visibilityState === 'visible') refreshAllData();
+    }, SAFETY_NET_MS);
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', refreshAllData);
+      clearInterval(safetyNet);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (fullRefreshRetryRef.current) clearTimeout(fullRefreshRetryRef.current);
     };
   }, []);
 

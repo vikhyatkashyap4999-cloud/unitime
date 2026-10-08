@@ -30,6 +30,30 @@ export class DataService {
     return Date.now() - this.lastWriteTimestamp < this.WRITE_GUARD_MS;
   }
 
+  // ─── Local-write tracking ───────────────────────────────────────────────────
+  // Supabase Realtime echoes this tab's own writes back to it a moment later.
+  // Remembering which rows this tab just wrote lets the realtime handler ignore
+  // those echoes, instead of re-applying data it already has (which flickers on
+  // rapid repeated edits) or re-downloading a whole table after a bulk upload.
+  private static recentLocalWrites = new Map<string, number>();
+  private static LOCAL_WRITE_TTL_MS = 5_000;
+
+  static markLocalWrite(tableName: string, ids: (string | undefined | null)[]): void {
+    const now = Date.now();
+    if (this.recentLocalWrites.size > 20_000) {
+      for (const [key, at] of this.recentLocalWrites) {
+        if (now - at > this.LOCAL_WRITE_TTL_MS) this.recentLocalWrites.delete(key);
+      }
+    }
+    for (const id of ids) if (id) this.recentLocalWrites.set(`${tableName}:${id}`, now);
+  }
+
+  static isRecentLocalWrite(tableName: string, id: string | undefined | null): boolean {
+    if (!id) return false;
+    const at = this.recentLocalWrites.get(`${tableName}:${id}`);
+    return at !== undefined && Date.now() - at < this.LOCAL_WRITE_TTL_MS;
+  }
+
   // ─── Private helpers ────────────────────────────────────────────────────────
 
   private static sanitize(tableName: string, item: any, termId?: string | null): any {
@@ -80,8 +104,11 @@ export class DataService {
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
+          const chunkIds = chunk.map((r: any) => r?.id);
+          this.markLocalWrite(tableName, chunkIds);
           const { error } = await supabase!.from(tableName).upsert(chunk);
           if (!error) {
+            this.markLocalWrite(tableName, chunkIds); // refresh: echoes arrive after commit
             succeeded = true;
             successCount += chunk.length;
             break;
@@ -152,22 +179,14 @@ export class DataService {
 
       console.log(`[DB] ${tableName}: loaded ${data.length} rows${termId ? ` (term ${termId})` : ''}`);
 
-      // ── Auto-migration ─────────────────────────────────────────────────────
-      // If 0 rows for the active termId but rows exist with a different termId
-      // (e.g. data was imported directly into Supabase with termId = term name),
-      // re-tag all rows to the active termId so they show up in the app.
-      if (data.length === 0 && termId && TERM_SCOPED.has(tableName)) {
-        const { data: all, error: allErr } = await this.fetchAllPages<any>((from, to) =>
-          supabase!.from(tableName).select('*').range(from, to)
-        );
-        if (!allErr && all && all.length > 0) {
-          console.log(`[DB] Auto-migrating ${all.length} ${tableName} rows → termId ${termId}`);
-          const sanitized = all.map((r: any) => this.sanitize(tableName, r, termId));
-          await this.upsertBatch(tableName, sanitized);
-          return sanitized as T[];
-        }
-      }
-      // ── End auto-migration ─────────────────────────────────────────────────
+      // NOTE: there used to be an "auto-migration" block here that, when the
+      // active term looked empty, re-tagged EVERY row in the table to the
+      // active termId. It trusted whatever term this browser tab believed was
+      // active — so a tab that briefly fell back to the mock term ('t1') would
+      // rewrite the whole live table to 't1'. It also downloaded the entire
+      // unscoped table to decide. Removed: a term that looks empty now simply
+      // shows empty. Mislabelled data is fixed deliberately (SQL, or the
+      // admin "re-link data" action), never silently by a background read.
 
       return data;
     } catch (err) {
@@ -299,6 +318,7 @@ export class DataService {
 
   static async deleteRecord(tableName: string, id: string): Promise<void> {
     if (!supabase) return;
+    this.markLocalWrite(tableName, [id]);
     const { error } = await supabase.from(tableName).delete().eq('id', id);
     if (error) {
       console.error(`[DB] deleteRecord error for ${tableName}:`, error.message);
@@ -309,6 +329,7 @@ export class DataService {
 
   static async deleteRecords(tableName: string, ids: string[]): Promise<void> {
     if (!supabase || ids.length === 0) return;
+    this.markLocalWrite(tableName, ids);
     const { error } = await supabase.from(tableName).delete().in('id', ids);
     if (error) {
       console.error(`[DB] deleteRecords error for ${tableName}:`, error.message);
@@ -326,6 +347,7 @@ export class DataService {
   ): Promise<ScheduleEntry[]> {
     if (!supabase || ids.length === 0) return allEntries;
     const remaining = allEntries.filter(e => !ids.includes((e as any)[field] ?? ''));
+    this.markLocalWrite('schedule', allEntries.filter(e => ids.includes((e as any)[field] ?? '')).map(e => e.id));
     const { error } = await supabase.from('schedule').delete().in(field, ids);
     if (error) console.warn(`[DB] schedule cascade-delete (${field}) warning:`, error.message);
     else console.log(`[DB] schedule: cascade-deleted entries for ${field} [${ids.join(',')}]`);
@@ -356,6 +378,7 @@ export class DataService {
   static async deleteEntries(ids: string[], allEntries: ScheduleEntry[]): Promise<void> {
     try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
     if (!supabase || ids.length === 0) return;
+    this.markLocalWrite('schedule', ids);
     const { error } = await supabase.from('schedule').delete().in('id', ids);
     if (error) console.error('[DB] deleteEntries error:', error.message);
     else console.log(`[DB] schedule: bulk-deleted ${ids.length} entries`);
@@ -365,6 +388,7 @@ export class DataService {
     try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
     if (!supabase) return;
     const sanitized = this.sanitize('schedule', entry, entry.termId);
+    this.markLocalWrite('schedule', [entry.id]);
     const { error } = await supabase.from('schedule').upsert([sanitized], { onConflict: 'id' });
     if (error) console.error('[DB] updateEntry error:', error.message);
     else console.log(`[DB] schedule: updated entry ${entry.id}`);
@@ -373,6 +397,7 @@ export class DataService {
   static async deleteEntry(id: string, allEntries: ScheduleEntry[]): Promise<void> {
     try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
     if (!supabase) return;
+    this.markLocalWrite('schedule', [id]);
     const { error } = await supabase.from('schedule').delete().eq('id', id);
     if (error) console.error('[DB] deleteEntry error:', error.message);
     else console.log(`[DB] schedule: deleted entry ${id}`);
