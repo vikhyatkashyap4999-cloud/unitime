@@ -489,13 +489,18 @@ const App: React.FC = () => {
     }
   }, [currentUser]);
 
+  // Clash detection waits a moment for a burst of changes to settle (dragging,
+  // pasting, a batch of realtime updates from colleagues) and then runs once,
+  // instead of re-running after every single change.
   useEffect(() => {
-    if (schedule.length > 0) {
-      const newClashes = DataService.detectConflicts(schedule, faculties, rooms, groups);
-      setClashes(newClashes);
-    } else {
+    if (schedule.length === 0) {
       setClashes([]);
+      return;
     }
+    const timer = setTimeout(() => {
+      setClashes(DataService.detectConflicts(schedule, faculties, rooms, groups));
+    }, 250);
+    return () => clearTimeout(timer);
   }, [schedule, faculties, rooms, groups]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -807,7 +812,8 @@ const App: React.FC = () => {
       setRooms([]);
       setGroups([]);
       
-      // Clear local storage keys
+      // Clear local storage keys (and drop any offline snapshot still waiting to be written)
+      DataService.cancelScheduleSnapshot();
       localStorage.removeItem('unitime_full_dataset');
       localStorage.removeItem('unitime_courses');
       localStorage.removeItem('unitime_faculties');
@@ -1189,7 +1195,7 @@ const App: React.FC = () => {
                         w={panel.w} 
                         h={panel.h} 
                         z={panel.z} 
-                        onRemove={() => setPanels(panels.filter(p => p.id !== panel.id))} 
+                        onRemove={() => setPanels(prev => prev.filter(p => p.id !== panel.id))}
                         onUpdateView={(type, viewId) => updatePanel(panel.id, { type, viewId })} 
                         onUpdateGeometry={(geom) => updatePanel(panel.id, geom)} 
                         onFocus={() => {

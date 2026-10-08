@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Clash } from '../types';
 import { AlertCircle, ShieldAlert, Users, DoorOpen, Zap, X, Trash2, AlertTriangle } from 'lucide-react';
 
@@ -6,11 +6,15 @@ interface ClashIndicatorProps {
   clashes: Clash[];
 }
 
+// Drawing hundreds of warning cards at once made the page sluggish while this
+// panel was open. The full list is always available in Reports → Clashes.
+const MAX_VISIBLE_CLASHES = 100;
+
 const ClashIndicator: React.FC<ClashIndicatorProps> = ({ clashes }) => {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [isOpen, setIsOpen] = useState(false);
 
-  const visibleClashes = clashes.filter(c => !dismissed.has(c.message));
+  const visibleClashes = useMemo(() => clashes.filter(c => !dismissed.has(c.message)), [clashes, dismissed]);
 
   if (clashes.length === 0) return null;
 
@@ -85,7 +89,15 @@ const ClashIndicator: React.FC<ClashIndicatorProps> = ({ clashes }) => {
                </div>
             )}
             
-            {visibleClashes.map((clash, idx) => (
+            {visibleClashes.length > MAX_VISIBLE_CLASHES && (
+              <div className="bg-white border-2 border-[#ccc] p-2 text-center pointer-events-auto shrink-0">
+                <p className="text-[10px] font-bold text-[#666] uppercase">
+                  Showing {MAX_VISIBLE_CLASHES} of {visibleClashes.length} — see Reports → Clashes for the full list
+                </p>
+              </div>
+            )}
+
+            {visibleClashes.slice(0, MAX_VISIBLE_CLASHES).map((clash, idx) => (
               <div 
                 key={idx} 
                 className="bg-[#d9534f] border-2 border-[#a94442] shadow-[4px_4px_0_rgba(169,68,66,0.3)] shrink-0"
@@ -118,4 +130,5 @@ const ClashIndicator: React.FC<ClashIndicatorProps> = ({ clashes }) => {
   );
 };
 
-export default ClashIndicator;
+// Only redraw when the clash list itself changes, not on every app re-render.
+export default React.memo(ClashIndicator);

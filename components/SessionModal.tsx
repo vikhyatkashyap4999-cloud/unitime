@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { Course, Faculty, Room, StudentGroup, DayOfWeek, ScheduleEntry } from '../types';
 import { DAYS, TIME_SLOTS, TOTAL_WEEKS } from '../constants';
@@ -82,6 +82,92 @@ const SessionModal: React.FC<SessionModalProps> = ({
 
   const dragControls = useDragControls();
 
+  // ── Whole-schedule scans, computed once per change ──────────────────────────
+  // These used to run on every render of this form (every keystroke and click),
+  // and the faculty-load figure ran once per faculty per selected week, scanning
+  // every session each time — with a full timetable that froze the form. Each is
+  // now a single pass, recalculated only when its own inputs change.
+  // Declared before the early return below, because hooks must always run.
+
+  // Highest weekly teaching load per faculty, across the selected weeks.
+  const facultyLoadById = useMemo(() => {
+    const loads = new Map<string, number>();
+    const selected = new Set(formData.weeks || []);
+    if (!isOpen || selected.size === 0) return loads;
+    const perWeek = new Map<string, Map<number, number>>();
+    for (const s of existingSchedule) {
+      if (!s.facultyId) continue;
+      const dur = DataService.getDuration(s.startTime, s.endTime);
+      for (const w of s.weeks || []) {
+        if (!selected.has(w)) continue;
+        let byWeek = perWeek.get(s.facultyId);
+        if (!byWeek) { byWeek = new Map(); perWeek.set(s.facultyId, byWeek); }
+        byWeek.set(w, (byWeek.get(w) || 0) + dur);
+      }
+    }
+    perWeek.forEach((byWeek, fid) => loads.set(fid, Math.max(...byWeek.values())));
+    return loads;
+  }, [isOpen, existingSchedule, formData.weeks]);
+
+  const facultyOptions = useMemo(() => {
+    if (!isOpen) return [];
+    return faculties.map(f => {
+      const load = facultyLoadById.get(f.id) || 0;
+      const isCritical = load >= f.maxHoursPerWeek;
+      return {
+        id: f.id,
+        name: `${f.name} (${f.facultyId || f.id})`,
+        sub: `${f.department} · Limit: ${f.maxHoursPerWeek}h`,
+        extra: <span className={`text-[9px] font-bold px-1 border ${isCritical ? 'bg-red-50 text-red-600 border-red-300' : 'bg-green-50 text-green-600 border-green-300'}`}>{load.toFixed(1)}h</span>
+      };
+    });
+  }, [isOpen, faculties, facultyLoadById]);
+
+  // Live "this will clash" warnings shown while filling in the form.
+  const inlineConflicts = useMemo(() => {
+    const conflicts: string[] = [];
+    if (!isOpen || !formData.day || !formData.startTime || !formData.endTime || !formData.weeks?.length) return conflicts;
+
+    const toMinutes = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    };
+    const sStart = toMinutes(formData.startTime);
+    const sEnd = toMinutes(formData.endTime);
+    const weekSet = new Set(formData.weeks);
+
+    for (const entry of existingSchedule) {
+      if (entry.day !== formData.day) continue;
+      if (!(entry.weeks || []).some(w => weekSet.has(w))) continue;
+      if (initialData?.id && entry.id === initialData.id) continue; // Don't conflict with self when editing
+
+      const eStart = toMinutes(entry.startTime);
+      const eEnd = toMinutes(entry.endTime);
+      if (!(sStart < eEnd && sEnd > eStart)) continue;
+
+      if (formData.roomId && entry.roomId === formData.roomId) {
+        const r = rooms.find(room => room.id === formData.roomId);
+        if (r && !conflicts.includes(`Room ${r.name} is double-booked`)) conflicts.push(`Room ${r.name} is double-booked`);
+      }
+      if (formData.facultyId && entry.facultyId === formData.facultyId) {
+        const f = faculties.find(fac => fac.id === formData.facultyId);
+        if (f && !conflicts.includes(`${f.name} is already teaching`)) conflicts.push(`${f.name} is already teaching`);
+      }
+      const entryGroups = entry.groupIds || [];
+      if (formData.groupIds && formData.groupIds.some(g => entryGroups.includes(g))) {
+        const sharedGroups = groups.filter(g => formData.groupIds!.includes(g.id) && entryGroups.includes(g.id));
+        sharedGroups.forEach(g => {
+          const cohortName = (g as any)._unique_name || g.name;
+          if (!conflicts.includes(`Cohort "${cohortName}" has a scheduling conflict`)) {
+            conflicts.push(`Cohort "${cohortName}" has a scheduling conflict`);
+          }
+        });
+      }
+    }
+    return conflicts;
+  }, [isOpen, existingSchedule, formData.day, formData.startTime, formData.endTime, formData.weeks,
+      formData.roomId, formData.facultyId, formData.groupIds, initialData?.id, rooms, faculties, groups]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -122,69 +208,10 @@ const SessionModal: React.FC<SessionModalProps> = ({
     }
   };
 
-  const getFacultyLoad = (facultyId: string) => {
-    const selectedWeeks = formData.weeks || [];
-    if (selectedWeeks.length === 0) return 0;
-    
-    let maxLoad = 0;
-    selectedWeeks.forEach(w => {
-      const load = existingSchedule
-        .filter(s => s.facultyId === facultyId && s.weeks.includes(w))
-        .reduce((sum, s) => sum + DataService.getDuration(s.startTime, s.endTime), 0);
-      if (load > maxLoad) maxLoad = load;
-    });
-    return maxLoad;
-  };
-
   const selectedFaculty = faculties.find(f => f.id === formData.facultyId);
-  const currentFacultyLoad = selectedFaculty ? getFacultyLoad(selectedFaculty.id) : 0;
+  const currentFacultyLoad = selectedFaculty ? (facultyLoadById.get(selectedFaculty.id) || 0) : 0;
   const loadPercentage = selectedFaculty ? (currentFacultyLoad / selectedFaculty.maxHoursPerWeek) * 100 : 0;
 
-  const getInlineConflicts = () => {
-    if (!formData.day || !formData.startTime || !formData.endTime || !formData.weeks?.length) return [];
-    
-    const formatTime = (t: string) => {
-      const [h,m] = t.split(':').map(Number);
-      return h * 60 + m;
-    };
-    const sStart = formatTime(formData.startTime);
-    const sEnd = formatTime(formData.endTime);
-
-    const conflicts: string[] = [];
-
-    existingSchedule.forEach(entry => {
-      if (entry.day !== formData.day) return;
-      if (!entry.weeks.some(w => formData.weeks!.includes(w))) return;
-      if (initialData?.id && entry.id === initialData.id) return; // Don't conflict with self when editing
-      
-      const eStart = formatTime(entry.startTime);
-      const eEnd = formatTime(entry.endTime);
-      
-      if (sStart < eEnd && sEnd > eStart) {
-        if (formData.roomId && entry.roomId === formData.roomId) {
-          const r = rooms.find(room => room.id === formData.roomId);
-          if (r && !conflicts.includes(`Room ${r.name} is double-booked`)) conflicts.push(`Room ${r.name} is double-booked`);
-        }
-        if (formData.facultyId && entry.facultyId === formData.facultyId) {
-          const f = faculties.find(fac => fac.id === formData.facultyId);
-          if (f && !conflicts.includes(`${f.name} is already teaching`)) conflicts.push(`${f.name} is already teaching`);
-        }
-        if (formData.groupIds && formData.groupIds.some(g => entry.groupIds.includes(g))) {
-          const sharedGroups = groups.filter(g => formData.groupIds!.includes(g.id) && entry.groupIds.includes(g.id));
-          sharedGroups.forEach(g => {
-            const cohortName = (g as any)._unique_name || g.name;
-            if (!conflicts.includes(`Cohort "${cohortName}" has a scheduling conflict`)) {
-              conflicts.push(`Cohort "${cohortName}" has a scheduling conflict`);
-            }
-          });
-        }
-      }
-    });
-    return conflicts;
-  };
-
-  const inlineConflicts = getInlineConflicts();
-  
   const isFormValid = !!(
     formData.courseId && 
     formData.facultyId && 
@@ -385,16 +412,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
                 <SearchableDropdown
                   label={<span>Staff / Faculty <span className="text-red-500">*</span></span>}
                   icon={<User className="w-3.5 h-3.5" />}
-                  options={faculties.map(f => {
-                     const load = getFacultyLoad(f.id);
-                     const isCritical = load >= f.maxHoursPerWeek;
-                     return {
-                       id: f.id,
-                       name: `${f.name} (${f.facultyId || f.id})`,
-                       sub: `${f.department} · Limit: ${f.maxHoursPerWeek}h`,
-                       extra: <span className={`text-[9px] font-bold px-1 border ${isCritical ? 'bg-red-50 text-red-600 border-red-300' : 'bg-green-50 text-green-600 border-green-300'}`}>{load.toFixed(1)}h</span>
-                     };
-                  })}
+                  options={facultyOptions}
                   value={formData.facultyId || ''}
                   onChange={id => setFormData({ ...formData, facultyId: id })}
                   placeholder="Select Faculty"

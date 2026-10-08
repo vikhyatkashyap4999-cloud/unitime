@@ -54,6 +54,33 @@ export class DataService {
     return at !== undefined && Date.now() - at < this.LOCAL_WRITE_TTL_MS;
   }
 
+  // ─── Offline schedule snapshot ──────────────────────────────────────────────
+  // A copy of the schedule is kept in localStorage as a fallback for when
+  // Supabase can't be reached. Writing 5,000+ sessions to localStorage is
+  // synchronous and briefly freezes the page, so instead of doing it on every
+  // single edit it's done at most once every few seconds with the latest data.
+  private static snapshotTimer: any = null;
+  private static pendingSnapshot: ScheduleEntry[] | null = null;
+  private static SNAPSHOT_DELAY_MS = 5_000;
+
+  private static persistScheduleSnapshot(entries: ScheduleEntry[]): void {
+    this.pendingSnapshot = entries;
+    if (this.snapshotTimer) return;
+    this.snapshotTimer = setTimeout(() => {
+      this.snapshotTimer = null;
+      const data = this.pendingSnapshot;
+      this.pendingSnapshot = null;
+      if (!data) return;
+      try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(data)); } catch {}
+    }, this.SNAPSHOT_DELAY_MS);
+  }
+
+  static cancelScheduleSnapshot(): void {
+    if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = null;
+    this.pendingSnapshot = null;
+  }
+
   // ─── Private helpers ────────────────────────────────────────────────────────
 
   private static sanitize(tableName: string, item: any, termId?: string | null): any {
@@ -351,7 +378,7 @@ export class DataService {
     const { error } = await supabase.from('schedule').delete().in(field, ids);
     if (error) console.warn(`[DB] schedule cascade-delete (${field}) warning:`, error.message);
     else console.log(`[DB] schedule: cascade-deleted entries for ${field} [${ids.join(',')}]`);
-    try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(remaining)); } catch {}
+    this.persistScheduleSnapshot(remaining);
     return remaining;
   }
 
@@ -359,7 +386,7 @@ export class DataService {
   // Each method only touches the specific rows that changed.
 
   static async addEntries(newEntries: ScheduleEntry[], allEntries: ScheduleEntry[]): Promise<void> {
-    try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
+    this.persistScheduleSnapshot(allEntries);
     if (!supabase || newEntries.length === 0) return;
     // Use upsertBatch (500-row chunks + retries) — a single upsert silently fails
     // for large restores (100+ rows on Supabase free tier).
@@ -376,7 +403,7 @@ export class DataService {
   }
 
   static async deleteEntries(ids: string[], allEntries: ScheduleEntry[]): Promise<void> {
-    try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
+    this.persistScheduleSnapshot(allEntries);
     if (!supabase || ids.length === 0) return;
     this.markLocalWrite('schedule', ids);
     const { error } = await supabase.from('schedule').delete().in('id', ids);
@@ -385,7 +412,7 @@ export class DataService {
   }
 
   static async updateEntry(entry: ScheduleEntry, allEntries: ScheduleEntry[]): Promise<void> {
-    try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
+    this.persistScheduleSnapshot(allEntries);
     if (!supabase) return;
     const sanitized = this.sanitize('schedule', entry, entry.termId);
     this.markLocalWrite('schedule', [entry.id]);
@@ -395,7 +422,7 @@ export class DataService {
   }
 
   static async deleteEntry(id: string, allEntries: ScheduleEntry[]): Promise<void> {
-    try { localStorage.setItem(this.SCHEDULE_KEY, JSON.stringify(allEntries)); } catch {}
+    this.persistScheduleSnapshot(allEntries);
     if (!supabase) return;
     this.markLocalWrite('schedule', [id]);
     const { error } = await supabase.from('schedule').delete().eq('id', id);
@@ -406,6 +433,9 @@ export class DataService {
   // ─── Clear operations ───────────────────────────────────────────────────────
 
   static async clearSchedule(termId?: string): Promise<void> {
+    // A snapshot still waiting to be written would otherwise put the cleared
+    // sessions back into the offline copy a few seconds later.
+    this.cancelScheduleSnapshot();
     try {
       const saved = localStorage.getItem(this.SCHEDULE_KEY);
       let entries: ScheduleEntry[] = saved ? JSON.parse(saved) : [];
@@ -483,63 +513,115 @@ export class DataService {
     roomList: Room[] = [],
     groupList: StudentGroup[] = []
   ): Clash[] {
+    // Same rule as before — two sessions clash when they're on the same day, start
+    // at the same time, share at least one week, and share a room, a faculty or a
+    // cohort — but reported ONCE per pair of sessions (listing the weeks), instead
+    // of once per week. A double-booking repeated over 18 weeks used to produce 18
+    // separate clashes, which made the list huge and slow to build and draw.
     const clashes: Clash[] = [];
-    const roomMap = new Map<string, string>();
-    const facultyMap = new Map<string, string>();
-    const cohortMap = new Map<string, string>();
-    const loadTracker = new Map<string, number>();
 
-    const getName = (list: any[], id: string, fallback: string) =>
-      list.find((x: any) => x.id === id)?._Faculty_name ||
-      list.find((x: any) => x.id === id)?._unique_name ||
-      list.find((x: any) => x.id === id)?.name ||
-      fallback;
+    // Name lookups built once (previously up to three full list scans per clash).
+    const nameIndex = (list: any[]) => {
+      const m = new Map<string, string>();
+      for (const x of list) if (x?.id) m.set(x.id, x._Faculty_name || x._unique_name || x.name);
+      return m;
+    };
+    const roomNames = nameIndex(roomList);
+    const facultyNames = nameIndex(facultyList);
+    const groupNames = nameIndex(groupList);
 
-    for (const entry of schedule) {
-      const weeks = Array.isArray(entry.weeks) ? entry.weeks : [];
-      const duration = this.getDuration(entry.startTime, entry.endTime);
-      for (const week of weeks) {
-        if (!entry.day || !entry.startTime) continue;
-        const base = `${week}-${entry.day}-${entry.startTime}`;
-
-        const rk = `${base}-room-${entry.roomId}`;
-        if (entry.roomId && roomMap.has(rk)) {
-          const roomName = getName(roomList, entry.roomId, `Room #${entry.roomId.slice(-6)}`);
-          clashes.push({ type: 'Room', message: `Room "${roomName}" is double-booked on ${entry.day} at ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, roomMap.get(rk)!] });
-        } else if (entry.roomId) roomMap.set(rk, entry.id);
-
-        const fk = `${base}-faculty-${entry.facultyId}`;
-        if (entry.facultyId && facultyMap.has(fk)) {
-          const facultyName = getName(facultyList, entry.facultyId, `Faculty #${entry.facultyId.slice(-6)}`);
-          clashes.push({ type: 'Faculty', message: `Faculty "${facultyName}" has overlapping sessions on ${entry.day} at ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, facultyMap.get(fk)!] });
-        } else if (entry.facultyId) facultyMap.set(fk, entry.id);
-
-        for (const gId of (entry.groupIds || [])) {
-          const gk = `${base}-cohort-${gId}`;
-          if (cohortMap.has(gk)) {
-            const cohortName = getName(groupList, gId, `Cohort #${gId.slice(-6)}`);
-            const otherEntryId = cohortMap.get(gk)!;
-            clashes.push({ type: 'Cohort', message: `Cohort "${cohortName}" is scheduled in two sessions simultaneously on ${entry.day} at ${entry.startTime} (Week ${week})`, affectedIds: [entry.id, otherEntryId] });
-          } else cohortMap.set(gk, entry.id);
-        }
-
-        if (entry.facultyId) {
-          loadTracker.set(`${week}-${entry.facultyId}`, (loadTracker.get(`${week}-${entry.facultyId}`) || 0) + duration);
-        }
+    // "Week 4" / "Weeks 4–12, 15"
+    const formatWeeks = (weeks: number[]) => {
+      const sorted = [...new Set(weeks)].sort((a, b) => a - b);
+      const parts: string[] = [];
+      let start = sorted[0];
+      let prev = sorted[0];
+      for (let i = 1; i <= sorted.length; i++) {
+        const w = sorted[i];
+        if (w === prev + 1) { prev = w; continue; }
+        parts.push(start === prev ? `${start}` : `${start}–${prev}`);
+        start = w;
+        prev = w;
       }
+      return `${sorted.length === 1 ? 'Week' : 'Weeks'} ${parts.join(', ')}`;
+    };
+
+    // Only sessions on the same day and start time can clash, so group by that
+    // and compare pairs within each small group — not every session against all.
+    const slots = new Map<string, { e: ScheduleEntry; weeks: Set<number> }[]>();
+    for (const e of schedule) {
+      const weeks = Array.isArray(e.weeks) ? e.weeks : [];
+      if (!e.day || !e.startTime || weeks.length === 0) continue;
+      const key = `${e.day}|${e.startTime}`;
+      let slot = slots.get(key);
+      if (!slot) { slot = []; slots.set(key, slot); }
+      slot.push({ e, weeks: new Set(weeks) });
     }
 
-    if (facultyList.length > 0) {
-      loadTracker.forEach((hours, key) => {
-        const [week, fId] = key.split('-');
-        const faculty = facultyList.find(f => f.id === fId);
-        if (faculty && hours > faculty.maxHoursPerWeek) {
-          clashes.push({
-            type: 'LoadViolation',
-            message: `Faculty "${faculty.name}" over capacity in Week ${week} (${hours.toFixed(1)}h / ${faculty.maxHoursPerWeek}h)`,
-            affectedIds: schedule.filter(s => s.facultyId === fId && (s.weeks || []).includes(Number(week))).map(s => s.id),
-          });
+    slots.forEach(slot => {
+      for (let i = 1; i < slot.length; i++) {
+        const b = slot[i];
+        const bGroups = b.e.groupIds || [];
+        for (let j = 0; j < i; j++) {
+          const a = slot[j];
+          const sameRoom = !!b.e.roomId && b.e.roomId === a.e.roomId;
+          const sameFaculty = !!b.e.facultyId && b.e.facultyId === a.e.facultyId;
+          const aGroups = a.e.groupIds || [];
+          const sharedGroups = bGroups.filter(g => aGroups.includes(g));
+          if (!sameRoom && !sameFaculty && sharedGroups.length === 0) continue;
+
+          const overlap: number[] = [];
+          b.weeks.forEach(w => { if (a.weeks.has(w)) overlap.push(w); });
+          if (overlap.length === 0) continue;
+
+          const when = `${b.e.day} at ${b.e.startTime} (${formatWeeks(overlap)})`;
+          const affectedIds = [b.e.id, a.e.id];
+          if (sameRoom) {
+            const roomName = roomNames.get(b.e.roomId!) || `Room #${b.e.roomId!.slice(-6)}`;
+            clashes.push({ type: 'Room', message: `Room "${roomName}" is double-booked on ${when}`, affectedIds });
+          }
+          if (sameFaculty) {
+            const facultyName = facultyNames.get(b.e.facultyId!) || `Faculty #${b.e.facultyId!.slice(-6)}`;
+            clashes.push({ type: 'Faculty', message: `Faculty "${facultyName}" has overlapping sessions on ${when}`, affectedIds });
+          }
+          for (const gId of sharedGroups) {
+            const cohortName = groupNames.get(gId) || `Cohort #${gId.slice(-6)}`;
+            clashes.push({ type: 'Cohort', message: `Cohort "${cohortName}" is scheduled in two sessions simultaneously on ${when}`, affectedIds });
+          }
         }
+      }
+    });
+
+    // Weekly teaching-hours limit — one warning per faculty, listing the weeks over.
+    if (facultyList.length > 0) {
+      const facultyById = new Map(facultyList.map(f => [f.id, f] as [string, Faculty]));
+      const hoursByWeek = new Map<string, Map<number, number>>();
+      const sessionsByFaculty = new Map<string, ScheduleEntry[]>();
+      for (const e of schedule) {
+        if (!e.facultyId || !e.day || !e.startTime) continue;
+        const duration = this.getDuration(e.startTime, e.endTime);
+        let byWeek = hoursByWeek.get(e.facultyId);
+        if (!byWeek) { byWeek = new Map(); hoursByWeek.set(e.facultyId, byWeek); }
+        for (const w of (Array.isArray(e.weeks) ? e.weeks : [])) byWeek.set(w, (byWeek.get(w) || 0) + duration);
+        let list = sessionsByFaculty.get(e.facultyId);
+        if (!list) { list = []; sessionsByFaculty.set(e.facultyId, list); }
+        list.push(e);
+      }
+      hoursByWeek.forEach((byWeek, fId) => {
+        const faculty = facultyById.get(fId);
+        if (!faculty) return;
+        const overWeeks: number[] = [];
+        let peak = 0;
+        byWeek.forEach((hours, w) => {
+          if (hours > faculty.maxHoursPerWeek) { overWeeks.push(w); peak = Math.max(peak, hours); }
+        });
+        if (overWeeks.length === 0) return;
+        const overSet = new Set(overWeeks);
+        clashes.push({
+          type: 'LoadViolation',
+          message: `Faculty "${faculty.name}" over capacity in ${formatWeeks(overWeeks)} (up to ${peak.toFixed(1)}h / ${faculty.maxHoursPerWeek}h)`,
+          affectedIds: (sessionsByFaculty.get(fId) || []).filter(s => (s.weeks || []).some(w => overSet.has(w))).map(s => s.id),
+        });
       });
     }
     return clashes;

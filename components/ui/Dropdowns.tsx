@@ -11,6 +11,18 @@ interface Option {
   extra?: React.ReactNode;
 }
 
+// Course/faculty/cohort lists run into the hundreds or thousands. Drawing every
+// option and redrawing them all on each keystroke made the dropdowns sluggish,
+// so only the first matches are drawn — typing narrows the list as before.
+const MAX_VISIBLE_OPTIONS = 50;
+
+const MoreResultsHint: React.FC<{ total: number }> = ({ total }) =>
+  total > MAX_VISIBLE_OPTIONS ? (
+    <div className="px-2 py-1.5 text-center text-[9px] font-bold text-[#888] uppercase tracking-wide border-t border-[#eee]">
+      Showing {MAX_VISIBLE_OPTIONS} of {total} — type to narrow down
+    </div>
+  ) : null;
+
 interface SearchableDropdownProps {
   label: string;
   options: Option[];
@@ -86,7 +98,7 @@ export const SearchableDropdown: React.FC<SearchableDropdownProps> = ({
               </div>
               <div className="max-h-60 overflow-y-auto p-1 custom-scrollbar bg-white">
                 {filteredOptions.length > 0 ? (
-                  filteredOptions.map(option => (
+                  filteredOptions.slice(0, MAX_VISIBLE_OPTIONS).map(option => (
                     <button
                       key={option.id}
                       type="button"
@@ -119,6 +131,7 @@ export const SearchableDropdown: React.FC<SearchableDropdownProps> = ({
                   </div>
                 )}
               </div>
+              <MoreResultsHint total={filteredOptions.length} />
               <div className="p-1.5 border-t border-[#eee] bg-[#f8f9fa]">
                 <button
                   type="button"
@@ -254,7 +267,7 @@ export const MultiSearchableDropdown: React.FC<MultiSearchableDropdownProps> = (
               </div>
               <div className="max-h-60 overflow-y-auto p-1 custom-scrollbar bg-white">
                 {filteredOptions.length > 0 ? (
-                  filteredOptions.map(option => (
+                  filteredOptions.slice(0, MAX_VISIBLE_OPTIONS).map(option => (
                     <button
                       key={option.id}
                       type="button"
@@ -282,6 +295,7 @@ export const MultiSearchableDropdown: React.FC<MultiSearchableDropdownProps> = (
                   </div>
                 )}
               </div>
+              <MoreResultsHint total={filteredOptions.length} />
               <div className="p-1.5 border-t border-[#eee] bg-[#f8f9fa] flex items-center justify-between gap-2">
                 <span className="text-[9px] font-bold text-[#888] uppercase tracking-wide">
                   {values.length} selected
