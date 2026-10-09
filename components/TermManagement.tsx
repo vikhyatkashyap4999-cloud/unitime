@@ -29,18 +29,41 @@ const TermManagement: React.FC<TermManagementProps> = ({ terms, onUpdateTerms, c
   const [formData, setFormData] = useState<Partial<Term>>(initialTermState);
 
   const handleToggleActive = (id: string) => {
+    const next = terms.find(t => t.id === id);
+    const current = terms.find(t => t.isActive);
+    // Switching the active term changes it for EVERY user at once: everyone's
+    // timetable, uploads and auto-scheduling move to the new term, and the old
+    // one becomes read-only. Its data is kept exactly as it is.
+    if (!confirm(
+      `Make "${next?.name}" the active term for everyone?\n\n` +
+      `• All users will start working in "${next?.name}".\n` +
+      (current ? `• "${current.name}" becomes read-only. Its data is kept and can still be viewed.\n` : '') +
+      `\nYou can switch back at any time.`
+    )) return;
     onUpdateTerms(terms.map(t => ({ ...t, isActive: t.id === id })));
   };
 
   const handleSaveTerm = (e: React.FormEvent) => {
     e.preventDefault();
     if (formData.name && formData.startDate && formData.endDate) {
+      const name = formData.name.trim();
+      // Term name doubles as the term's ID (all its data is tagged with it), so two
+      // terms with the same name would share — and overwrite — each other's data.
+      const duplicate = terms.find(t => t.id !== editingTermId &&
+        (t.id.toLowerCase() === name.toLowerCase() || t.name.trim().toLowerCase() === name.toLowerCase()));
+      if (duplicate) {
+        alert(`A term named "${duplicate.name}" already exists. Please pick a different name.`);
+        return;
+      }
       if (isEditing && editingTermId) {
-        onUpdateTerms(terms.map(t => t.id === editingTermId ? { ...t, ...formData as Term } : t));
+        // Only the label/dates change — the ID (and so the data linked to it) stays the same.
+        // isActive is never changed from this form; use "Set as Active" for that.
+        const { isActive: _ignored, ...edits } = formData;
+        onUpdateTerms(terms.map(t => t.id === editingTermId ? { ...t, ...edits as Term, name, isActive: t.isActive } : t));
       } else {
         const term: Term = {
-          id: formData.name.trim(),
-          name: formData.name,
+          id: name,
+          name,
           academicYear: formData.academicYear || '2024/25',
           startDate: formData.startDate,
           endDate: formData.endDate,
@@ -67,9 +90,24 @@ const TermManagement: React.FC<TermManagementProps> = ({ terms, onUpdateTerms, c
   };
 
   const handleDeleteTerm = (id: string) => {
-    if (confirm('Are you sure you want to delete this term? All related schedules may be affected.')) {
-      onUpdateTerms(terms.filter(t => t.id !== id));
+    const term = terms.find(t => t.id === id);
+    if (!term) return;
+    if (term.isActive) {
+      alert(`"${term.name}" is the active term and can't be deleted.\n\nMake another term active first if you really need to remove it.`);
+      return;
     }
+    const typed = prompt(
+      `Delete the term "${term.name}"?\n\n` +
+      `Its timetable, modules, faculty, rooms and cohorts will no longer be reachable from the app. ` +
+      `Keep old terms instead of deleting them — they are read-only and don't get in the way.\n\n` +
+      `To confirm, type the term name exactly:`
+    );
+    if (typed === null) return;
+    if (typed.trim() !== term.name.trim()) {
+      alert('The name did not match. Nothing was deleted.');
+      return;
+    }
+    onUpdateTerms(terms.filter(t => t.id !== id));
   };
 
   return (

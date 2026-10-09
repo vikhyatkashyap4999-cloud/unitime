@@ -20,7 +20,7 @@ import {
   Term, Course, Faculty, Room, StudentGroup, ScheduleEntry, Clash, Role, ViewType, UserAccount, DayOfWeek
 } from './types';
 import { 
-  MOCK_TERMS, MOCK_COURSES, MOCK_FACULTY, MOCK_ROOMS, MOCK_GROUPS 
+  MOCK_COURSES, MOCK_FACULTY, MOCK_ROOMS, MOCK_GROUPS
 } from './constants';
 import { 
   Plus, MapPin, Download, ChevronUp, ChevronDown, Calendar, LayoutGrid, Clock
@@ -46,13 +46,14 @@ const App: React.FC = () => {
     }
   });
   const [activeTab, setActiveTab] = useState('dashboard');
+  // Windows open with nothing selected — the user picks what to view.
   const [panels, setPanels] = useState<any[]>([
-    { id: 'p1', type: 'Group', viewId: 'g1', x: 20, y: 20, w: 800, h: 350, z: 10 },
+    { id: 'p1', type: 'Group', viewId: '', x: 20, y: 20, w: 800, h: 350, z: 10 },
   ]);
 
   const resetUIState = () => {
     setActiveTab('dashboard');
-    setPanels([{ id: 'p1', type: 'Group', viewId: 'g1', x: 20, y: 20, w: 800, h: 350, z: 10 }]);
+    setPanels([{ id: 'p1', type: 'Group', viewId: '', x: 20, y: 20, w: 800, h: 350, z: 10 }]);
     setIsRoomToolOpen(false);
   };
 
@@ -87,8 +88,10 @@ const App: React.FC = () => {
   // Users are NOT cached in localStorage — Supabase is the single source of truth.
   // Caching caused ghost users to appear after Supabase deletes, breaking login.
   const [users, setUsers] = useState<UserAccount[]>(MOCK_USERS);
-  // Initialise terms from localStorage so effectiveActiveTerm is the REAL term at mount,
-  // not the mock one — prevents loading term-scoped data with the wrong termId.
+  // Initialise terms from the last real list cached from Supabase. There is
+  // deliberately NO made-up fallback term any more: a placeholder term once made
+  // edits get saved under a term that didn't exist ('t1'). If no real term is
+  // known yet, the app simply shows nothing and blocks edits until terms load.
   const [terms, setTerms] = useState<Term[]>(() => {
     try {
       const saved = localStorage.getItem('unitime_terms');
@@ -97,7 +100,7 @@ const App: React.FC = () => {
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
-    return MOCK_TERMS;
+    return [];
   });
   const [courses, setCourses] = useState<Course[]>([]);
   const [faculties, setFaculties] = useState<Faculty[]>([]);
@@ -142,6 +145,28 @@ const App: React.FC = () => {
     ? terms.find(t => t.id === viewingTermId)
     : terms.find(t => t.isActive);
 
+  // ── Term safety: edits are only allowed in the ACTIVE term ──────────────────
+  // Viewing an older term is read-only, so a past term's timetable and data can't
+  // be changed by accident while you're looking at it. Every edit handler calls
+  // canWrite() first. It reads a ref because some panels hold older copies of
+  // these handlers (they skip re-rendering when only callbacks change).
+  const activeTerm = terms.find(t => t.isActive);
+  const writeBlockReason: string | null = !effectiveActiveTerm
+    ? 'No academic term is loaded yet, so nothing can be saved. Please refresh the page.'
+    : (viewingTermId && viewingTermId !== activeTerm?.id)
+      ? `You are viewing "${effectiveActiveTerm.name}", which is not the active term. ` +
+        `Past terms are read-only so their data stays safe — switch back to the active term to make changes.`
+      : null;
+  const writeBlockReasonRef = useRef<string | null>(writeBlockReason);
+  writeBlockReasonRef.current = writeBlockReason;
+  const canWrite = (): boolean => {
+    if (writeBlockReasonRef.current) {
+      alert(writeBlockReasonRef.current);
+      return false;
+    }
+    return true;
+  };
+
   useEffect(() => {
     // Always clear stale user cache on startup — Supabase is the single source of truth for users.
     localStorage.removeItem('unitime_users');
@@ -155,7 +180,7 @@ const App: React.FC = () => {
         // never matched the real data stored in Supabase / localStorage.
         const [u, t] = await Promise.all([
           DataService.loadEntity<UserAccount>('users', 'unitime_users', MOCK_USERS),
-          DataService.loadEntity<Term>('terms', 'unitime_terms', MOCK_TERMS),
+          DataService.loadEntity<Term>('terms', 'unitime_terms', []),
         ]);
         setUsers(u);
         setTerms(t);
@@ -177,6 +202,8 @@ const App: React.FC = () => {
           DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], realActiveTermId),
           DataService.loadAllEntries(realActiveTermId),
         ]);
+        // The term on screen changed while this was loading — don't show another term's data.
+        if (activeTermIdRef.current !== realActiveTermId) return;
         setCourses(c);
         setFaculties(f);
         setRooms(r);
@@ -212,10 +239,16 @@ const App: React.FC = () => {
         }, delay);
       };
 
-      const refetchSchedule = () => debouncedRefresh('schedule', async () => {
-        const s = await DataService.fetchTable<ScheduleEntry>('schedule', activeTermIdRef.current);
-        if (s !== null) setScheduleAndRef(s);
-      });
+      // Refetch one term-scoped table, ignoring the result if the term on screen
+      // changed while the request was in flight.
+      const refetchForTerm = <T,>(table: string, apply: (rows: T[]) => void) => async () => {
+        const termId = activeTermIdRef.current;
+        const rows = await DataService.fetchTable<T>(table, termId);
+        if (rows !== null && activeTermIdRef.current === termId) apply(rows);
+      };
+
+      const refetchSchedule = () => debouncedRefresh('schedule',
+        refetchForTerm<ScheduleEntry>('schedule', s => setScheduleAndRef(s)));
 
       // Realtime can deliver Postgres arrays either as JSON arrays or as "{a,b}" text.
       const toList = (v: any): string[] => {
@@ -291,22 +324,14 @@ const App: React.FC = () => {
           const t = await DataService.fetchTable<Term>('terms');
           if (t !== null && t.length > 0) setTerms(t);
         }))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, onTableChange('courses', async () => {
-          const c = await DataService.fetchTable<Course>('courses', activeTermIdRef.current);
-          if (c !== null) setCourses(c);
-        }))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' }, onTableChange('faculties', async () => {
-          const f = await DataService.fetchTable<Faculty>('faculties', activeTermIdRef.current);
-          if (f !== null) setFaculties(f);
-        }))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, onTableChange('rooms', async () => {
-          const r = await DataService.fetchTable<Room>('rooms', activeTermIdRef.current);
-          if (r !== null) setRooms(r);
-        }))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, onTableChange('groups', async () => {
-          const g = await DataService.fetchTable<StudentGroup>('groups', activeTermIdRef.current);
-          if (g !== null) setGroups(g);
-        }))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' },
+          onTableChange('courses', refetchForTerm<Course>('courses', c => setCourses(c))))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'faculties' },
+          onTableChange('faculties', refetchForTerm<Faculty>('faculties', f => setFaculties(f))))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' },
+          onTableChange('rooms', refetchForTerm<Room>('rooms', r => setRooms(r))))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' },
+          onTableChange('groups', refetchForTerm<StudentGroup>('groups', g => setGroups(g))))
         .subscribe((rawStatus) => {
           const status = String(rawStatus);
           if (status === 'SUBSCRIBED') {
@@ -338,6 +363,12 @@ const App: React.FC = () => {
     if (!termId || termId === loadedTermIdRef.current) return;
     loadedTermIdRef.current = termId;
 
+    // Undo/redo history belongs to the term it was recorded in. Undoing after a
+    // term switch would replay the other term's timetable into this one.
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    syncHistoryState();
+
     const reloadForTerm = async () => {
       setIsSyncing(true);
       isSyncingRef.current = true;
@@ -349,6 +380,8 @@ const App: React.FC = () => {
           DataService.loadEntity<StudentGroup>('groups', 'unitime_groups', [], termId),
           DataService.loadAllEntries(termId),
         ]);
+        // Switched to yet another term while this was loading — discard this result.
+        if (activeTermIdRef.current !== termId) return;
         setCourses(c);
         setFaculties(f);
         setRooms(r);
@@ -408,6 +441,8 @@ const App: React.FC = () => {
       // (empty result during normal operation likely means stale read)
       if (t !== null && t.length > 0) setTerms(t);
       if (u !== null && u.length > 0) setUsers(u);
+      // Term-scoped data: only apply it if the term on screen is still the one fetched.
+      if (activeTermIdRef.current !== termId) return true;
       if (c !== null) setCourses(c);
       if (f !== null) setFaculties(f);
       if (r !== null) setRooms(r);
@@ -512,12 +547,16 @@ const App: React.FC = () => {
   const maxZRef = useRef(12);
 
   const handleSaveSession = async (newEntries: Omit<ScheduleEntry, 'id' | 'departmentId'>[]) => {
+    if (!canWrite()) return;
+    const termId = activeTermIdRef.current || effectiveActiveTerm?.id;
+    if (!termId) { alert('No active term — nothing was saved.'); return; }
     pushHistory();
     const now = new Date().toISOString();
     const entries: ScheduleEntry[] = newEntries.map((ne, index) => ({
       ...ne,
       id: `s-${Date.now()}-${index}`,
-      termId: effectiveActiveTerm?.id || ne.termId || '',
+      // Always the term on screen — never a value carried in from a form or file.
+      termId,
       departmentId: currentUser?.departmentScope === 'All' ? 'CS' : (currentUser?.departmentScope || 'General'),
       createdBy: currentUser?.name || currentUser?.username || 'Unknown',
       createdAt: now,
@@ -537,6 +576,7 @@ const App: React.FC = () => {
   };
 
   const handleDeleteSession = async (id: string) => {
+    if (!canWrite()) return;
     pushHistory();
     await withSync(async () => {
       const updatedSchedule = scheduleRef.current.filter(s => s.id !== id);
@@ -546,6 +586,7 @@ const App: React.FC = () => {
   };
 
   const handleUpdateSession = async (updatedEntry: ScheduleEntry) => {
+    if (!canWrite()) return;
     pushHistory();
     const auditedEntry: ScheduleEntry = {
       ...updatedEntry,
@@ -560,6 +601,7 @@ const App: React.FC = () => {
   };
 
   const handleMoveSession = async (entryId: string, newDay: any, newStartTime: string) => {
+    if (!canWrite()) return;
     pushHistory();
     await withSync(async () => {
       const entry = scheduleRef.current.find(s => s.id === entryId);
@@ -587,6 +629,7 @@ const App: React.FC = () => {
   };
 
   const handleDuplicateSession = async (entry: ScheduleEntry) => {
+    if (!canWrite()) return;
     pushHistory();
     await withSync(async () => {
       const duplicatedEntry: ScheduleEntry = { ...entry, id: `s-${Date.now()}-dup` };
@@ -598,6 +641,7 @@ const App: React.FC = () => {
 
   const handleDeleteMultipleSessions = async (ids: string[]) => {
     if (ids.length === 0) return;
+    if (!canWrite()) return;
     pushHistory();
     await withSync(async () => {
       const updatedSchedule = scheduleRef.current.filter(s => !ids.includes(s.id));
@@ -641,6 +685,7 @@ const App: React.FC = () => {
 
   const handleUndo = async () => {
     if (undoStackRef.current.length === 0) return;
+    if (!canWrite()) return;
     const target = undoStackRef.current.pop()!;
     redoStackRef.current = [...redoStackRef.current, [...scheduleRef.current]];
     const current = [...scheduleRef.current];
@@ -668,6 +713,7 @@ const App: React.FC = () => {
 
   const handleRedo = async () => {
     if (redoStackRef.current.length === 0) return;
+    if (!canWrite()) return;
     const target = redoStackRef.current.pop()!;
     undoStackRef.current = [...undoStackRef.current, [...scheduleRef.current]];
     const current = [...scheduleRef.current];
@@ -738,6 +784,7 @@ const App: React.FC = () => {
   type ProgressFn = (pct: number, synced: number, total: number) => void;
 
   const handleUpdateCourses = async (updatedCourses: Course[], onProgress?: ProgressFn) => {
+    if (!canWrite()) return;
     await withSync(async () => {
       const deletedIds = courses.filter(old => !updatedCourses.some(n => n.id === old.id)).map(c => c.id);
       if (deletedIds.length > 0) {
@@ -752,6 +799,7 @@ const App: React.FC = () => {
   };
 
   const handleUpdateFaculties = async (updatedFaculties: Faculty[], onProgress?: ProgressFn) => {
+    if (!canWrite()) return;
     await withSync(async () => {
       const deletedIds = faculties.filter(old => !updatedFaculties.some(n => n.id === old.id)).map(f => f.id);
       if (deletedIds.length > 0) {
@@ -766,6 +814,7 @@ const App: React.FC = () => {
   };
 
   const handleUpdateRooms = async (updatedRooms: Room[], onProgress?: ProgressFn) => {
+    if (!canWrite()) return;
     await withSync(async () => {
       const deletedIds = rooms.filter(old => !updatedRooms.some(n => n.id === old.id)).map(r => r.id);
       if (deletedIds.length > 0) {
@@ -780,6 +829,7 @@ const App: React.FC = () => {
   };
 
   const handleUpdateGroups = async (updatedGroups: StudentGroup[], onProgress?: ProgressFn) => {
+    if (!canWrite()) return;
     await withSync(async () => {
       const deletedIds = groups.filter(old => !updatedGroups.some(n => n.id === old.id)).map(g => g.id);
       setGroups(updatedGroups);
@@ -790,53 +840,89 @@ const App: React.FC = () => {
 
 
 
-  const handleWipeAllData = async () => {
-    if (!confirm('CRITICAL ACTION: This will delete ALL modules, faculty, rooms, cohorts and scheduled sessions from BOTH local storage and Supabase. Only user accounts and terms will be preserved. Proceed?')) {
-      return;
-    }
+  // (A "wipe everything" function used to live here. It was never connected to
+  // any button, and it deleted every term's data at once — removed so it can't be.)
 
-    isSyncingRef.current = true;
-    setIsSyncing(true);
-    try {
-      if (supabase) {
-        const tables = ['schedule', 'courses', 'faculties', 'rooms', 'groups'];
-        for (const table of tables) {
-          await supabase.from(table).delete().neq('id', '0');
+  type RegistryTable = 'courses' | 'faculties' | 'rooms' | 'groups';
+  const registrySetters: Record<RegistryTable, (fn: (prev: any[]) => any[]) => void> = {
+    courses: fn => setCourses(prev => fn(prev)),
+    faculties: fn => setFaculties(prev => fn(prev)),
+    rooms: fn => setRooms(prev => fn(prev)),
+    groups: fn => setGroups(prev => fn(prev)),
+  };
+
+  // Edit one course / faculty / room / cohort in place. Sessions point at these
+  // records by their internal id (which never changes here), so every existing
+  // session automatically shows the corrected details — nothing else is rewritten.
+  const handleUpdateRecord = async (table: RegistryTable, item: any) => {
+    if (!canWrite()) return;
+    const termId = activeTermIdRef.current;
+    // Drop import-time helper fields (_name, _unique_name, …): they aren't saved
+    // to the database and would otherwise keep showing the old value until reload.
+    const clean: any = {};
+    Object.keys(item).forEach(k => { if (!k.startsWith('_')) clean[k] = item[k]; });
+    await withSync(async () => {
+      registrySetters[table](prev => prev.map(r => r.id === clean.id ? clean : r));
+      await DataService.upsertRecords(table, [clean], termId);
+    });
+  };
+
+  // Hand every session of one faculty (in the active term) over to another —
+  // e.g. when a faculty member leaves. Undo-able like any other timetable edit.
+  const handleTransferFacultyLoad = async (fromId: string, toId: string): Promise<number> => {
+    if (!canWrite() || !fromId || !toId || fromId === toId) return 0;
+    const termId = activeTermIdRef.current;
+    const now = new Date().toISOString();
+    const who = currentUser?.name || currentUser?.username || 'Unknown';
+    const moved = scheduleRef.current
+      .filter(s => s.facultyId === fromId && (!termId || s.termId === termId))
+      .map(s => ({ ...s, facultyId: toId, updatedBy: who, updatedAt: now }));
+    if (moved.length === 0) return 0;
+    pushHistory();
+    let ok = true;
+    await withSync(async () => {
+      const movedById = new Map(moved.map(m => [m.id, m] as [string, ScheduleEntry]));
+      const updatedSchedule = scheduleRef.current.map(s => movedById.get(s.id) || s);
+      setScheduleAndRef(updatedSchedule);
+      try {
+        await DataService.addEntries(moved, updatedSchedule); // upsert, in batches
+      } catch (err) {
+        ok = false;
+        throw err;
+      }
+    });
+    return ok ? moved.length : 0;
+  };
+
+  // Copy courses / faculty / rooms / cohorts from another term INTO the active
+  // term, so a new term can start from last term's setup. Copies get new ids
+  // belonging to the active term; the source term is only read, never changed.
+  const handleCopyRegistryFromTerm = async (sourceTermId: string, tables: RegistryTable[]): Promise<string> => {
+    if (!canWrite()) return '';
+    const targetTermId = activeTermIdRef.current;
+    if (!targetTermId || !sourceTermId || sourceTermId === targetTermId) return '';
+    const stripTermPrefix = (id: string) => {
+      const i = id.indexOf('__');
+      return i >= 0 ? id.slice(i + 2) : id;
+    };
+    const current: Record<RegistryTable, any[]> = { courses, faculties, rooms, groups };
+    const summary: string[] = [];
+    await withSync(async () => {
+      for (const table of tables) {
+        const source = await DataService.fetchTable<any>(table, sourceTermId);
+        if (source === null) throw new Error(`Could not read ${table} from the source term — nothing was copied for it.`);
+        const existingIds = new Set(current[table].map(r => r.id));
+        const copies = source
+          .map(r => ({ ...r, id: `${targetTermId}__${stripTermPrefix(r.id)}`, termId: targetTermId }))
+          .filter(r => !existingIds.has(r.id));
+        if (copies.length > 0) {
+          await DataService.upsertRecords(table, copies, targetTermId);
+          registrySetters[table](prev => [...prev, ...copies]);
         }
+        summary.push(`${table}: ${copies.length} copied${source.length - copies.length > 0 ? `, ${source.length - copies.length} already present` : ''}`);
       }
-      
-      // Clear local state
-      setScheduleAndRef([]);
-      setCourses([]);
-      setFaculties([]);
-      setRooms([]);
-      setGroups([]);
-      
-      // Clear local storage keys (and drop any offline snapshot still waiting to be written)
-      DataService.cancelScheduleSnapshot();
-      localStorage.removeItem('unitime_full_dataset');
-      localStorage.removeItem('unitime_courses');
-      localStorage.removeItem('unitime_faculties');
-      localStorage.removeItem('unitime_rooms');
-      localStorage.removeItem('unitime_groups');
-      
-      alert('System successfully reset. All demo data has been purged.');
-      
-      // ✅ CRITICAL RECOVERY: After a full wipe, force browser to clear the SW and Cache
-      // to prevent deleted data from "reappearing" via old cached API responses.
-      if ('serviceWorker' in navigator) {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        for(let r of regs) await r.unregister();
-      }
-      const keys = await caches.keys();
-      for(let k of keys) await caches.delete(k);
-      
-      window.location.replace(window.location.origin + '?wipe_complete=' + Date.now());
-    } catch (err: any) {
-      alert('Reset Failed: ' + (err.message || 'Unknown error.'));
-    }
-    setIsSyncing(false);
-    setTimeout(() => { isSyncingRef.current = false; }, 4000);
+    });
+    return summary.join('\n');
   };
 
   // Admin: wipe a single entity table for the active term.
@@ -845,6 +931,7 @@ const App: React.FC = () => {
   const handleWipeEntity = async (
     tab: 'Modules' | 'Faculties' | 'Rooms' | 'Cohorts'
   ) => {
+    if (!canWrite()) return;
     const termId = effectiveActiveTerm?.id;
     const termName = effectiveActiveTerm?.name || termId || 'active term';
     if (!termId) { alert('No active term selected.'); return; }
@@ -880,17 +967,23 @@ const App: React.FC = () => {
     }
   };
 
-  // Admin: delete ALL schedule entries across all terms.
-  // No termId filter — catches old/orphaned entries (e.g. termId='t1' from mock data)
-  // that would be missed if we only filtered by effectiveActiveTerm?.id.
+  // Admin: delete the timetable of the ACTIVE term only. This used to delete every
+  // term's sessions at once — with more than one term, that would wipe past terms.
   const handleClearSchedule = async () => {
-    const totalEntries = scheduleRef.current.length;
-    if (!confirm(`Delete ALL ${totalEntries} timetable entries? This cannot be undone.`)) return;
+    if (!canWrite()) return;
+    const termId = activeTermIdRef.current;
+    const termName = effectiveActiveTerm?.name || termId;
+    if (!termId) { alert('No active term selected.'); return; }
+    const totalEntries = scheduleRef.current.filter(s => s.termId === termId).length;
+    if (!confirm(`Delete all ${totalEntries} timetable entries in term "${termName}"?\n\nOther terms are not affected. This cannot be undone.`)) return;
     isSyncingRef.current = true;
     setIsSyncing(true);
     try {
-      await DataService.clearSchedule(); // no termId = deletes every row in schedule table
-      setScheduleAndRef([]);
+      await DataService.clearSchedule(termId);
+      setScheduleAndRef(scheduleRef.current.filter(s => s.termId !== termId));
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      syncHistoryState();
     } catch (err: any) {
       alert('Failed to clear schedule: ' + (err.message || 'Unknown error'));
     } finally {
@@ -899,38 +992,10 @@ const App: React.FC = () => {
     }
   };
 
-  // Re-tag all existing data with the active term's ID.
-  // Fixes the case where data was uploaded under the mock term (id='t1') but the
-  // real active term has a different ID — data exists in Supabase but nothing shows.
-  const handleMigrateData = async () => {
-    const termId = effectiveActiveTerm?.id;
-    const termName = effectiveActiveTerm?.name || termId || 'active term';
-    if (!termId) { alert('No active term selected.'); return; }
-    if (!confirm(`Re-link ALL existing data to term "${termName}"?\n\nThis fixes the "data exists in Supabase but nothing shows" problem. It does not delete or re-upload anything.`)) return;
-    isSyncingRef.current = true;
-    setIsSyncing(true);
-    try {
-      const counts = await DataService.migrateDataToTerm(termId);
-      const summary = Object.entries(counts).map(([t, n]) => `${t}: ${n} rows`).join(', ');
-      // Reload all data so UI reflects the migration immediately
-      const [c, f, r, g] = await Promise.all([
-        DataService.fetchTable<Course>('courses', termId),
-        DataService.fetchTable<Faculty>('faculties', termId),
-        DataService.fetchTable<Room>('rooms', termId),
-        DataService.fetchTable<StudentGroup>('groups', termId),
-      ]);
-      if (c !== null) setCourses(c);
-      if (f !== null) setFaculties(f);
-      if (r !== null) setRooms(r);
-      if (g !== null) setGroups(g);
-      alert(`Data re-linked successfully!\n${summary}`);
-    } catch (err: any) {
-      alert('Migration failed: ' + (err.message || 'Unknown error'));
-    } finally {
-      setIsSyncing(false);
-      setTimeout(() => { isSyncingRef.current = false; }, 2000);
-    }
-  };
+  // (A "re-link ALL data to the active term" function used to live here. It MOVED
+  // every course/faculty/room/cohort from every term into the active one, which
+  // would break a past term's timetable. It was never connected to a button and
+  // has been removed; use "Copy from another term" in Data Import instead.)
 
 
 
@@ -1239,7 +1304,7 @@ const App: React.FC = () => {
           )}
           {activeTab === 'reports' && <ReportsPanel schedule={schedule} courses={courses} faculties={faculties} rooms={rooms} groups={groups} terms={terms} clashes={clashes} currentUser={currentUser} activeTermId={effectiveActiveTerm?.id} onDeleteEntry={handleDeleteSession} onDeleteMultiple={handleDeleteMultipleSessions} />}
           {activeTab === 'terms' && (currentUser.role !== Role.VIEWER) && <TermManagement terms={terms} onUpdateTerms={handleUpdateTerms} currentUser={currentUser} onViewTerm={(id) => { setViewingTermId(id); setActiveTab('dashboard'); }} viewingTermId={viewingTermId} />}
-          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} cohorts={groups} schedule={schedule} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadCohorts={handleUpdateGroups} onRestoreSchedule={handleSaveSession} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} />}
+          {activeTab === 'data' && (currentUser.role === Role.SUPER_ADMIN || currentUser.role === Role.ADMIN) && <DataImportPanel courses={courses} faculties={faculties} rooms={rooms} cohorts={groups} schedule={schedule} onUploadCourses={handleUpdateCourses} onUploadFaculties={handleUpdateFaculties} onUploadRooms={handleUpdateRooms} onUploadCohorts={handleUpdateGroups} onRestoreSchedule={handleSaveSession} onWipeData={handleWipeEntity} activeTermId={effectiveActiveTerm?.id} activeTermName={effectiveActiveTerm?.name} terms={terms} onUpdateRecord={handleUpdateRecord} onTransferFacultyLoad={handleTransferFacultyLoad} onCopyFromTerm={handleCopyRegistryFromTerm} readOnlyReason={writeBlockReason} />}
           {/* Keep AutoSchedulePanel always mounted (never unmounts on tab switch) so that
               uploaded files, generated results, and progress state are never lost. */}
           {(currentUser.role !== Role.VIEWER) && (

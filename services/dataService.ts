@@ -471,29 +471,18 @@ export class DataService {
     console.log(`[DB] ${tableName}: wiped for term ${termId}`);
   }
 
-  // ─── Migration ──────────────────────────────────────────────────────────────
-
-  static async migrateDataToTerm(newTermId: string): Promise<{ [table: string]: number }> {
-    if (!supabase) throw new Error('Supabase not configured');
-    const tables = [
-      { name: 'courses',   storageKey: 'unitime_courses' },
-      { name: 'faculties', storageKey: 'unitime_faculties' },
-      { name: 'rooms',     storageKey: 'unitime_rooms' },
-      { name: 'groups',    storageKey: 'unitime_groups' },
-    ];
-    const counts: { [table: string]: number } = {};
-    for (const { name } of tables) {
-      const { data, error } = await this.fetchAllPages<any>((from, to) =>
-        supabase!.from(name).select('*').range(from, to)
-      );
-      if (error || !data || data.length === 0) { counts[name] = 0; continue; }
-      const sanitized = data.map((r: any) => this.sanitize(name, r, newTermId));
-      const err = await this.upsertBatch(name, sanitized);
-      if (err) throw new Error(`Migration failed for ${name}: ${err}`);
-      counts[name] = data.length;
-      console.log(`[DB] Migrated ${data.length} ${name} rows → term ${newTermId}`);
-    }
-    return counts;
+  // ─── Targeted record save ───────────────────────────────────────────────────
+  // Save just the given rows (edit one record, copy records into a term) without
+  // touching anything else. saveEntity rewrites a whole table and its callers
+  // delete whatever isn't in the list they pass — the wrong tool for one record.
+  // (The old migrateDataToTerm lived here: it re-tagged EVERY row of every term
+  // to one term, breaking past terms. Removed.)
+  static async upsertRecords(tableName: string, items: any[], termId?: string): Promise<void> {
+    if (!supabase || items.length === 0) return;
+    this.lastWriteTimestamp = Date.now();
+    const err = await this.upsertBatch(tableName, items.map(i => this.sanitize(tableName, i, termId)));
+    this.lastWriteTimestamp = Date.now();
+    if (err) throw new Error(`Failed to save ${tableName}: ${err}`);
   }
 
   // ─── Utilities ──────────────────────────────────────────────────────────────

@@ -436,12 +436,9 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                 value={viewType} 
                 onChange={(e) => {
                   const newType = e.target.value as ViewType;
-                  let defaultId = '';
-                  if (newType === 'Room') defaultId = rooms[0]?.id;
-                  else if (newType === 'Faculty') defaultId = faculties[0]?.id;
-                  else if (newType === 'Group') defaultId = groups[0]?.id;
-                  else if (newType === 'Course') defaultId = courses[0]?.id;
-                  onUpdateView?.(newType, defaultId);
+                  // Start with nothing selected — preselecting the first item meant
+                  // clearing it every time before picking what you were looking for.
+                  onUpdateView?.(newType, '');
                   setSearchQuery('');
                 }} 
                 className="appearance-none bg-white border border-[#ccc] px-2 py-0.5 pr-6 text-xs font-bold uppercase tracking-widest outline-none cursor-pointer hover:bg-[#e6e6e6] transition-all"

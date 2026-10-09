@@ -174,7 +174,7 @@ const SessionModal: React.FC<SessionModalProps> = ({
     e.preventDefault();
     if (formData.courseId && formData.facultyId && formData.roomId && formData.groupIds && formData.groupIds.length > 0 && formData.day && formData.startTime && formData.endTime) {
       const baseEntry: Omit<ScheduleEntry, 'id' | 'departmentId'> = {
-        termId: formData.termId || 't1', // Will be overridden by activeTermId in App.tsx handleSave
+        termId: formData.termId || '', // Always replaced with the active term in App.tsx handleSaveSession
         courseId: formData.courseId,
         facultyId: formData.facultyId,
         roomId: formData.roomId,

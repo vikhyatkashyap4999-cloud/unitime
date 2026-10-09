@@ -1,8 +1,50 @@
 import React, { useRef, useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import { BookOpen, User, Users, MapPin, Download, Upload, CheckCircle2, RefreshCcw, FileText, Database, Plus, Trash2, AlertTriangle, RotateCcw, Shield, Search, X } from 'lucide-react';
-import { Course, Faculty, Room, StudentGroup, ScheduleEntry } from '../types';
+import { BookOpen, User, Users, MapPin, Download, Upload, CheckCircle2, RefreshCcw, FileText, Database, Plus, Trash2, AlertTriangle, RotateCcw, Shield, Search, X, Pencil, ArrowRightLeft, Copy, Lock } from 'lucide-react';
+import { Course, Faculty, Room, StudentGroup, ScheduleEntry, Term } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { SearchableDropdown } from './ui/Dropdowns';
+
+type RegistryTable = 'courses' | 'faculties' | 'rooms' | 'groups';
+
+const TAB_TO_TABLE: Record<'Modules' | 'Faculties' | 'Rooms' | 'Cohorts', RegistryTable> = {
+  Modules: 'courses', Faculties: 'faculties', Rooms: 'rooms', Cohorts: 'groups',
+};
+
+// Fields that can be edited on screen — only ones that are actually saved to the
+// database. The field marked `identity` must stay unique within a term.
+const EDIT_FIELDS: Record<RegistryTable, { key: string; label: string; type: 'text' | 'number'; identity?: boolean }[]> = {
+  courses: [
+    { key: 'code', label: 'Module Code', type: 'text', identity: true },
+    { key: 'name', label: 'Module Name', type: 'text' },
+    { key: 'credits', label: 'Credits', type: 'number' },
+    { key: 'department', label: 'Department', type: 'text' },
+    { key: 'type', label: 'Type (Theory / Lab / …)', type: 'text' },
+    { key: 'duration', label: 'Duration (hours)', type: 'number' },
+  ],
+  faculties: [
+    { key: 'facultyId', label: 'Faculty ID', type: 'text', identity: true },
+    { key: 'name', label: 'Faculty Name', type: 'text' },
+    { key: 'department', label: 'Department', type: 'text' },
+    { key: 'maxHoursPerWeek', label: 'Max Hours / Week', type: 'number' },
+  ],
+  rooms: [
+    { key: 'name', label: 'Room Name / ID', type: 'text', identity: true },
+    { key: 'capacity', label: 'Capacity', type: 'number' },
+    { key: 'type', label: 'Type (Lecture / Lab / …)', type: 'text' },
+  ],
+  groups: [
+    { key: 'name', label: 'Cohort Name / ID', type: 'text', identity: true },
+    { key: 'program', label: 'Program', type: 'text' },
+    { key: 'semester', label: 'Semester', type: 'number' },
+    { key: 'studentCount', label: 'Student Count', type: 'number' },
+  ],
+};
+
+const toMinutes = (t: string) => {
+  const [h, m] = String(t || '0:0').split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+};
 
 type ProgressFn = (pct: number, synced: number, total: number) => void;
 
@@ -20,6 +62,11 @@ interface DataImportPanelProps {
   onWipeData: (tab: 'Modules' | 'Faculties' | 'Rooms' | 'Cohorts') => Promise<void>;
   activeTermId?: string;
   activeTermName?: string;
+  terms: Term[];
+  onUpdateRecord: (table: RegistryTable, item: any) => Promise<void>;
+  onTransferFacultyLoad: (fromId: string, toId: string) => Promise<number>;
+  onCopyFromTerm: (sourceTermId: string, tables: RegistryTable[]) => Promise<string>;
+  readOnlyReason?: string | null;
 }
 
 type ImportType = 'Modules' | 'Faculties' | 'Rooms' | 'Cohorts';
@@ -28,7 +75,8 @@ type AllTabType = ImportType | 'Schedule';
 const DataImportPanel: React.FC<DataImportPanelProps> = ({
   courses, faculties, rooms, cohorts, schedule,
   onUploadCourses, onUploadFaculties, onUploadRooms, onUploadCohorts,
-  onRestoreSchedule, onWipeData, activeTermId, activeTermName
+  onRestoreSchedule, onWipeData, activeTermId, activeTermName,
+  terms, onUpdateRecord, onTransferFacultyLoad, onCopyFromTerm, readOnlyReason
 }) => {
   const [activeTab, setActiveTab] = useState<AllTabType>('Modules');
   const [lastUpload, setLastUpload] = useState<{ type: string; count: number } | null>(null);
@@ -49,6 +97,108 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
     unmatched: { modules: string[]; faculties: string[]; rooms: string[]; cohorts: string[] };
   } | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
+
+  // ── Edit one record ──────────────────────────────────────────────────────────
+  const [editing, setEditing] = useState<{ table: RegistryTable; original: any; draft: any } | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const openEdit = (table: RegistryTable, item: any) => setEditing({ table, original: item, draft: { ...item } });
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    const { table, original, draft } = editing;
+    const fields = EDIT_FIELDS[table];
+    const updated: any = { ...original };
+    for (const f of fields) {
+      const raw = draft[f.key];
+      if (f.type === 'number') {
+        const n = Number(raw);
+        if (raw === '' || raw === undefined || isNaN(n)) { alert(`"${f.label}" must be a number.`); return; }
+        updated[f.key] = n;
+      } else {
+        const s = String(raw ?? '').trim();
+        if (f.identity && !s) { alert(`"${f.label}" can't be empty.`); return; }
+        updated[f.key] = s;
+      }
+    }
+    // Warn before creating a duplicate code/ID within this term — matching on it
+    // (uploads, backups, auto-scheduling) would become ambiguous.
+    const identity = fields.find(f => f.identity);
+    if (identity) {
+      const list: any[] = table === 'courses' ? courses : table === 'faculties' ? faculties : table === 'rooms' ? rooms : cohorts;
+      const value = String(updated[identity.key]).toLowerCase();
+      const clash = list.find(r => r.id !== original.id && r.termId === activeTermId &&
+        String(r[identity.key] ?? '').toLowerCase() === value);
+      if (clash && !confirm(`Another record in this term already uses ${identity.label} "${updated[identity.key]}". Save anyway?`)) return;
+    }
+    setIsSavingEdit(true);
+    try {
+      await onUpdateRecord(table, updated);
+      setEditing(null);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  // ── Transfer one faculty's load to another ──────────────────────────────────
+  const [transferFrom, setTransferFrom] = useState<Faculty | null>(null);
+  const [transferTo, setTransferTo] = useState('');
+  const [isTransferring, setIsTransferring] = useState(false);
+
+  const transferInfo = useMemo(() => {
+    if (!transferFrom) return { sessions: 0, clashes: 0 };
+    const inTerm = (s: ScheduleEntry) => !activeTermId || s.termId === activeTermId;
+    const mine = schedule.filter(s => s.facultyId === transferFrom.id && inTerm(s));
+    const theirs = transferTo ? schedule.filter(s => s.facultyId === transferTo && inTerm(s)) : [];
+    // A moved session clashes if the new faculty already teaches at an overlapping
+    // time on the same day in at least one of the same weeks.
+    const clashes = mine.filter(a => theirs.some(b =>
+      b.day === a.day &&
+      toMinutes(a.startTime) < toMinutes(b.endTime) && toMinutes(b.startTime) < toMinutes(a.endTime) &&
+      (a.weeks || []).some(w => (b.weeks || []).includes(w))
+    )).length;
+    return { sessions: mine.length, clashes };
+  }, [transferFrom, transferTo, schedule, activeTermId]);
+
+  const confirmTransfer = async () => {
+    if (!transferFrom || !transferTo) return;
+    const target = faculties.find(f => f.id === transferTo);
+    const msg = `Move all ${transferInfo.sessions} session(s) from "${transferFrom.name}" to "${target?.name}"?` +
+      (transferInfo.clashes > 0 ? `\n\n⚠️ ${transferInfo.clashes} of them clash with sessions "${target?.name}" already teaches. They'll show up as clashes to fix.` : '') +
+      `\n\nYou can undo this from the Timetable Builder.`;
+    if (!confirm(msg)) return;
+    setIsTransferring(true);
+    try {
+      const moved = await onTransferFacultyLoad(transferFrom.id, transferTo);
+      if (moved > 0) alert(`Done — ${moved} session(s) moved to "${target?.name}".`);
+      setTransferFrom(null);
+      setTransferTo('');
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  // ── Copy setup from another term ────────────────────────────────────────────
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copySource, setCopySource] = useState('');
+  const [copyTables, setCopyTables] = useState<RegistryTable[]>(['courses', 'faculties', 'rooms', 'groups']);
+  const [isCopying, setIsCopying] = useState(false);
+  const otherTerms = terms.filter(t => t.id !== activeTermId);
+
+  const confirmCopy = async () => {
+    if (!copySource || copyTables.length === 0) return;
+    const source = terms.find(t => t.id === copySource);
+    if (!confirm(`Copy ${copyTables.join(', ')} from "${source?.name}" into "${activeTermName || activeTermId}"?\n\n"${source?.name}" itself is not changed. Records already in this term are skipped.`)) return;
+    setIsCopying(true);
+    try {
+      const summary = await onCopyFromTerm(copySource, copyTables);
+      if (summary) alert(`Copy finished:\n${summary}`);
+      setCopyOpen(false);
+      setCopySource('');
+    } finally {
+      setIsCopying(false);
+    }
+  };
 
   const templates = {
     Modules: "_module_id,_unique_name,_name,_academic_year,Semester\n1,CHCE2028_2,Chemical Technology,2025,SEM-3\n2,CS101,Intro to CS,2025,SEM-1",
@@ -390,16 +540,18 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
             (moduleUniqueId && c.code?.toLowerCase() === moduleUniqueId.toLowerCase())
           );
 
-          // ── Faculty lookup (CRITICAL FIX) ──────────────────────────────
-          // Previously only checked _Faculty_ID (stripped by sanitize) and f.id (compound).
-          // Now also checks f.facultyId (schema-persisted, set to _Faculty_ID during import).
-          const faculty = faculties.find(f =>
-            (f as any)._Faculty_ID === facultyIdRaw ||
-            f.facultyId === facultyIdRaw ||
-            f.id === facultyIdRaw ||
-            (facultyIdRaw && f.facultyId?.toLowerCase() === facultyIdRaw.toLowerCase()) ||
-            (facultyNameRaw && ((f as any)._Faculty_name === facultyNameRaw || f.name === facultyNameRaw))
-          );
+          // ── Faculty lookup ─────────────────────────────────────────────
+          // Faculty ID decides. Names repeat (two "Dr. Sharma"s) and get typed
+          // differently, so the name is only used when the row has no ID at all —
+          // an ID that isn't in the registry is reported, never guessed by name.
+          const faculty = facultyIdRaw
+            ? faculties.find(f =>
+                f.facultyId?.toLowerCase() === facultyIdRaw.toLowerCase() ||
+                (f as any)._Faculty_ID === facultyIdRaw ||
+                f.id === facultyIdRaw)
+            : facultyNameRaw
+              ? faculties.find(f => f.name?.trim().toLowerCase() === facultyNameRaw.toLowerCase())
+              : undefined;
 
           // ── Room lookup ────────────────────────────────────────────────
           // _unique_name is lost after reload but r.name was set to _name || _unique_name
@@ -411,8 +563,9 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
 
           if (!course && moduleUniqueId && !unmatchedModules.includes(moduleUniqueId))
             unmatchedModules.push(moduleUniqueId);
-          if (!faculty && facultyIdRaw && !unmatchedFaculties.includes(facultyIdRaw))
-            unmatchedFaculties.push(facultyIdRaw);
+          const facultyKey = facultyIdRaw || facultyNameRaw;
+          if (!faculty && facultyKey && !unmatchedFaculties.includes(facultyKey))
+            unmatchedFaculties.push(facultyKey);
           if (!room && roomUniqueName && !unmatchedRooms.includes(roomUniqueName))
             unmatchedRooms.push(roomUniqueName);
 
@@ -441,9 +594,9 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
 
           events.push({
             termId: activeTermId || '',
-            courseId: course?.id || '',
-            facultyId: faculty?.id || '',
-            roomId: room?.id || '',
+            courseId: course?.id || null,
+            facultyId: faculty?.id || null,
+            roomId: room?.id || null,
             groupIds,
             day: firstRow['_day_of_week'] as any,
             startTime: firstRow['_start_time'],
@@ -718,7 +871,19 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
           <td className="px-3 py-2 font-bold text-[#185baf]">{item._unique_name || item.name || item.id}</td>
           <td className="px-3 py-2">{item._name || item.name}</td>
         </>)}
-        <td className="px-3 py-2 text-right">
+        <td className="px-3 py-2 text-right whitespace-nowrap">
+          <button onClick={() => openEdit(TAB_TO_TABLE[activeTab as ImportType], item)}
+            className="p-1.5 text-[#185baf] hover:bg-[#eaf2ff] border border-transparent hover:border-[#185baf] transition-all"
+            title="Edit — changes show in every session that uses this record">
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+          {activeTab === 'Faculties' && (
+            <button onClick={() => { setTransferFrom(item); setTransferTo(''); }}
+              className="p-1.5 text-[#7c3aed] hover:bg-[#f3e8ff] border border-transparent hover:border-[#7c3aed] transition-all"
+              title="Transfer this faculty's whole timetable to another faculty">
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button onClick={() => deleteItem(activeTab as ImportType, item.id)}
             className="p-1.5 text-[#ac2925] hover:bg-[#ebd5d5] border border-transparent hover:border-[#ac2925] transition-all"
             title="Delete Record">
@@ -834,8 +999,22 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
               No active term. Go to Terms tab and set one as active first.
             </div>
           )}
+          {readOnlyReason && (
+            <div className="mt-1.5 flex items-start gap-2 px-3 py-1.5 bg-[#fff7ed] border border-[#fdba74] text-[#9a3412] text-[11px] font-bold max-w-xl">
+              <Lock className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>Read-only: {readOnlyReason}</span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
+          {activeTab !== 'Schedule' && otherTerms.length > 0 && (
+            <button onClick={() => setCopyOpen(true)} disabled={!activeTermId || !!readOnlyReason}
+              title="Copy modules / faculty / rooms / cohorts from another term into this one"
+              className="flex items-center gap-2 px-3 py-1.5 text-[#185baf] hover:bg-[#eaf2ff] font-bold text-sm transition-colors border border-transparent hover:border-[#185baf] disabled:opacity-40 disabled:cursor-not-allowed">
+              <Copy className="w-4 h-4" />
+              Copy from another term
+            </button>
+          )}
           <AnimatePresence>
             {lastUpload && (
               <motion.div
@@ -1130,6 +1309,125 @@ const DataImportPanel: React.FC<DataImportPanelProps> = ({
       </div>
       <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept=".csv" />
       </>)}
+
+      {/* ── Edit record modal ── */}
+      {editing && (
+        <div className="fixed inset-0 z-[200] bg-black/40 flex items-center justify-center p-4" onClick={() => !isSavingEdit && setEditing(null)}>
+          <div className="bg-white border border-[#c8ddf8] shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="text-white px-4 py-2.5 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, #0f3d8c, #185baf)' }}>
+              <h3 className="font-bold text-[13px] uppercase tracking-wide flex items-center gap-2"><Pencil className="w-4 h-4" /> Edit record</h3>
+              <button onClick={() => setEditing(null)} disabled={isSavingEdit}><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              {EDIT_FIELDS[editing.table].map(f => (
+                <label key={f.key} className="block">
+                  <span className="text-[10px] font-bold uppercase text-[#555] tracking-wide">{f.label}</span>
+                  <input type={f.type} value={editing.draft[f.key] ?? ''}
+                    onChange={e => setEditing(prev => prev && { ...prev, draft: { ...prev.draft, [f.key]: e.target.value } })}
+                    className="mt-1 w-full border border-[#ccc] px-2 py-1.5 text-sm focus:outline-none focus:border-[#185baf]" />
+                </label>
+              ))}
+              <p className="text-[11px] text-[#666] leading-snug">
+                Sessions link to this record by its internal ID, so every session that uses it shows the new details right away.
+              </p>
+            </div>
+            <div className="px-4 py-3 border-t border-[#eee] flex justify-end gap-2">
+              <button onClick={() => setEditing(null)} disabled={isSavingEdit} className="px-3 py-1.5 text-sm font-bold text-[#555] hover:bg-[#f3f3f3]">Cancel</button>
+              <button onClick={saveEdit} disabled={isSavingEdit} className="btn-primary px-4 py-1.5 text-sm font-bold disabled:opacity-50">
+                {isSavingEdit ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Transfer faculty load modal ── */}
+      {transferFrom && (
+        <div className="fixed inset-0 z-[200] bg-black/40 flex items-center justify-center p-4" onClick={() => !isTransferring && setTransferFrom(null)}>
+          <div className="bg-white border border-[#c8ddf8] shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="text-white px-4 py-2.5 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, #5b21b6, #7c3aed)' }}>
+              <h3 className="font-bold text-[13px] uppercase tracking-wide flex items-center gap-2"><ArrowRightLeft className="w-4 h-4" /> Transfer faculty load</h3>
+              <button onClick={() => setTransferFrom(null)} disabled={isTransferring}><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="text-sm">
+                <span className="text-[10px] font-bold uppercase text-[#555] tracking-wide block">From</span>
+                <span className="font-bold">{transferFrom.name}</span>
+                <span className="text-[#666]"> ({transferFrom.facultyId || '—'})</span>
+                <span className="block text-[12px] text-[#555] mt-0.5">{transferInfo.sessions} session(s) in this term</span>
+              </div>
+              <SearchableDropdown
+                label="To faculty"
+                icon={<User className="w-4 h-4" />}
+                placeholder="Search faculty by name or ID…"
+                value={transferTo}
+                onChange={setTransferTo}
+                options={faculties
+                  .filter(f => f.id !== transferFrom.id && (!activeTermId || f.termId === activeTermId))
+                  .map(f => ({ id: f.id, name: f.name, code: f.facultyId, sub: f.department }))}
+              />
+              {transferTo && (
+                <div className={`text-[12px] px-3 py-2 border ${transferInfo.clashes > 0 ? 'bg-[#fff7ed] border-[#fdba74] text-[#9a3412]' : 'bg-[#f0fdf4] border-[#86efac] text-[#166534]'}`}>
+                  {transferInfo.clashes > 0
+                    ? `${transferInfo.clashes} of the ${transferInfo.sessions} session(s) clash with this faculty's existing timetable.`
+                    : `No clashes with this faculty's existing timetable.`}
+                </div>
+              )}
+            </div>
+            <div className="px-4 py-3 border-t border-[#eee] flex justify-end gap-2">
+              <button onClick={() => setTransferFrom(null)} disabled={isTransferring} className="px-3 py-1.5 text-sm font-bold text-[#555] hover:bg-[#f3f3f3]">Cancel</button>
+              <button onClick={confirmTransfer} disabled={!transferTo || transferInfo.sessions === 0 || isTransferring || !!readOnlyReason}
+                className="btn-primary px-4 py-1.5 text-sm font-bold disabled:opacity-50">
+                {isTransferring ? 'Moving…' : `Move ${transferInfo.sessions} session(s)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Copy from another term modal ── */}
+      {copyOpen && (
+        <div className="fixed inset-0 z-[200] bg-black/40 flex items-center justify-center p-4" onClick={() => !isCopying && setCopyOpen(false)}>
+          <div className="bg-white border border-[#c8ddf8] shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="text-white px-4 py-2.5 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, #0f3d8c, #185baf)' }}>
+              <h3 className="font-bold text-[13px] uppercase tracking-wide flex items-center gap-2"><Copy className="w-4 h-4" /> Copy from another term</h3>
+              <button onClick={() => setCopyOpen(false)} disabled={isCopying}><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-4 space-y-4">
+              <label className="block">
+                <span className="text-[10px] font-bold uppercase text-[#555] tracking-wide">Copy from term</span>
+                <select value={copySource} onChange={e => setCopySource(e.target.value)}
+                  className="mt-1 w-full border border-[#ccc] px-2 py-1.5 text-sm focus:outline-none focus:border-[#185baf]">
+                  <option value="">Select a term…</option>
+                  {otherTerms.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </label>
+              <div>
+                <span className="text-[10px] font-bold uppercase text-[#555] tracking-wide">What to copy</span>
+                <div className="mt-1 grid grid-cols-2 gap-1.5">
+                  {([['courses', 'Modules'], ['faculties', 'Faculties'], ['rooms', 'Rooms'], ['groups', 'Cohorts']] as [RegistryTable, string][]).map(([t, label]) => (
+                    <label key={t} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input type="checkbox" checked={copyTables.includes(t)}
+                        onChange={e => setCopyTables(prev => e.target.checked ? [...prev, t] : prev.filter(x => x !== t))} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <p className="text-[11px] text-[#666] leading-snug">
+                Copies are new records belonging to "{activeTermName || activeTermId}". The source term is not touched, and editing the copies later won't affect it. The timetable itself is not copied.
+              </p>
+            </div>
+            <div className="px-4 py-3 border-t border-[#eee] flex justify-end gap-2">
+              <button onClick={() => setCopyOpen(false)} disabled={isCopying} className="px-3 py-1.5 text-sm font-bold text-[#555] hover:bg-[#f3f3f3]">Cancel</button>
+              <button onClick={confirmCopy} disabled={!copySource || copyTables.length === 0 || isCopying}
+                className="btn-primary px-4 py-1.5 text-sm font-bold disabled:opacity-50">
+                {isCopying ? 'Copying…' : 'Copy'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

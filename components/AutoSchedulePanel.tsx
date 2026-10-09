@@ -36,6 +36,7 @@ function downloadCSV(filename: string, content: string) {
 }
 
 function getErrorCategory(u: UnresolvedSession): string {
+  if (u.facultyNotFound) return 'Faculty ID Not Found';
   const d = u.diagnostics;
   if (!d) return 'No Viable Slot';
   if (u.sessionsPlaced > 0 && u.sessionsPlaced < u.sessionsNeeded) return 'Partial Placement';

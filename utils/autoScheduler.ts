@@ -50,6 +50,7 @@ export interface UnresolvedSession {
   sessionsPlaced: number;
   reason: string;
   diagnostics?: ConflictDiagnostics;
+  facultyNotFound?: boolean;
 }
 
 // A session that was placed successfully (day/time/faculty/cohort all resolved)
@@ -458,15 +459,18 @@ export async function runAutoScheduler(
   // lowercase) so a CSV value like " 600001" or "ABC-01" with different casing
   // still resolves — an exact-match-only ID check was silently dropping faculty
   // (and showing blank in the timetable) whenever case/whitespace differed.
+  // When the sheet gives a Faculty ID, only the ID is used — names repeat and are
+  // spelled differently, so falling back to the name could hand the load to the
+  // wrong person. The name is used only for rows that have no ID at all.
   const findFaculty = (id: string, name: string) => {
     if (id) {
       const nId = normId(id);
-      const byId = existingFaculties.find(f =>
+      return existingFaculties.find(f =>
         normId(f.facultyId ?? '') === nId || normId(f.id ?? '') === nId ||
         normId((f as any)._Faculty_ID ?? '') === nId
       );
-      if (byId) return byId;
     }
+    if (!name) return undefined;
     const nName = normName(name);
     return existingFaculties.find(f =>
       normName(f.name) === nName ||
@@ -601,6 +605,22 @@ export async function runAutoScheduler(
     const faculty  = findFaculty(asgn.facultyId, asgn.facultyName);
     const groups   = asgn.cohorts.map(findGroup).filter(Boolean) as StudentGroup[];
     const groupIds = groups.map(g => g.id);
+
+    if (asgn.facultyId && !faculty) {
+      unresolved.push({
+        courseCode:      asgn.courseCode,
+        courseName:      asgn.courseName,
+        facultyId:       asgn.facultyId,
+        facultyName:     asgn.facultyName,
+        cohorts:         asgn.cohorts,
+        category:        asgn.category,
+        sessionsNeeded,
+        sessionsPlaced:  0,
+        reason:          `Faculty ID "${asgn.facultyId}" not found in the Faculty registry for this term`,
+        facultyNotFound: true,
+      });
+      continue;
+    }
 
     const dayKey = `${asgn.facultyId}::${asgn.courseCode}::${[...asgn.cohorts].sort().join(',')}`;
     if (!usedDays.has(dayKey)) usedDays.set(dayKey, new Set());
