@@ -26,7 +26,36 @@ export interface CourseAssignment {
   timeStart: number;          // 8 or 10
   timeEnd: number;            // 16 or 18
   lunchStart: string;         // "13" (fixed) or "12-14" (flexible — rotates per day)
+  // Daily time window for the cohorts on this row, e.g. Sem 2 = 8–13, Sem 4 = 13–18,
+  // so two semesters sharing faculty/rooms never overlap. Applies to the cohort on
+  // EVERY row it appears in, so it only needs filling once per cohort. null = no limit.
+  cohortTimeStart?: number | null;
+  cohortTimeEnd?: number | null;
 }
+
+// "13", "13:00", "13:30", "8.5" → hours as a number (13, 13, 13.5, 8.5).
+// Excel sometimes stores a time as a fraction of a day (0.5416 = 13:00) — handled too.
+// Blank or unreadable → null.
+export function parseClockHour(raw: string | undefined | null): number | null {
+  const t = String(raw ?? '').trim();
+  if (!t) return null;
+  const hm = t.match(/^(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*(am|pm)?$/i);
+  let h: number;
+  if (hm) {
+    h = parseInt(hm[1], 10) + (hm[2] ? parseInt(hm[2], 10) / 60 : 0);
+    const ap = hm[3]?.toLowerCase();
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h >= 12) h -= 12;
+  } else {
+    const n = parseFloat(t);
+    if (isNaN(n)) return null;
+    h = n > 0 && n < 1 ? n * 24 : n;
+  }
+  h = Math.round(h * 2) / 2; // slots are built on the half hour at most
+  return h >= 0 && h <= 24 ? h : null;
+}
+
+const fmtHour = (h: number) => padTime(h);
 
 export interface ConflictDiagnostics {
   primaryReason: string;
@@ -51,6 +80,7 @@ export interface UnresolvedSession {
   reason: string;
   diagnostics?: ConflictDiagnostics;
   facultyNotFound?: boolean;
+  windowTooNarrow?: boolean;   // cohort time window ∩ faculty hours can't fit one session
 }
 
 // A session that was placed successfully (day/time/faculty/cohort all resolved)
@@ -377,7 +407,7 @@ function buildDiagnostics(
   } else if (top.name === 'faculty' && rejFaculty > 0) {
     const facLabel = `${asgn.facultyName} (ID: ${asgn.facultyId})`;
     primaryReason = `${facLabel} already booked on ${rejFaculty} of ${totalCandidates} candidate slots`;
-    suggestions.push(`${facLabel} may be overloaded — reduce total credits or extend FacultyTimeStart/End (currently ${asgn.timeStart}:00–${asgn.timeEnd}:00, ${asgn.workingDays}).`);
+    suggestions.push(`${facLabel} may be overloaded — reduce total credits or extend FacultyTimeStart/End (currently ${fmtHour(asgn.timeStart)}–${fmtHour(asgn.timeEnd)}, ${asgn.workingDays}).`);
     if (asgn.facultyBlockDay || asgn.dayForBlock)
       suggestions.push(`Block columns (FacultyBlockDay="${asgn.facultyBlockDay}" / Explo-Day-Block="${asgn.dayForBlock}") are reducing slots — verify they are correct.`);
   } else if (top.name === 'cohort' && rejCohort > 0) {
@@ -397,8 +427,8 @@ function buildDiagnostics(
     primaryReason = `Partial placement — ${placed} of ${needed} sessions placed`;
     suggestions.push(`${needed - placed} more slot(s) needed. Remaining candidates are blocked by faculty/cohort load.`);
   } else {
-    primaryReason = `No viable slot in ${asgn.workingDays} ${asgn.timeStart}:00–${asgn.timeEnd}:00 (${totalCandidates} candidates checked)`;
-    suggestions.push(`Widen the scheduling window via FacultyTimeStart/End or switch FacultyWorkingDays.`);
+    primaryReason = `No viable slot in ${asgn.workingDays} ${fmtHour(asgn.timeStart)}–${fmtHour(asgn.timeEnd)} (${totalCandidates} candidates checked)`;
+    suggestions.push(`Widen the scheduling window via FacultyTimeStart/End, CohortTimeStart/End or switch FacultyWorkingDays.`);
   }
 
   return {
@@ -556,9 +586,31 @@ export async function runAutoScheduler(
 
   }
 
+  // ── Cohort time windows (CohortTimeStart / CohortTimeEnd) ─────────────────
+  // A window set on any row applies to that cohort everywhere it appears. If two
+  // rows give the same cohort different windows, the overlap of both is used.
+  const cohortWindow = new Map<string, { start: number; end: number }>();
+  for (const asgn of assignments) {
+    const ws = asgn.cohortTimeStart ?? null;
+    const we = asgn.cohortTimeEnd ?? null;
+    if (ws === null && we === null) continue;
+    for (const g of asgn.cohorts.map(findGroup).filter(Boolean) as StudentGroup[]) {
+      const prev = cohortWindow.get(g.id) ?? { start: 0, end: 24 };
+      cohortWindow.set(g.id, {
+        start: Math.max(prev.start, ws ?? 0),
+        end:   Math.min(prev.end,   we ?? 24),
+      });
+    }
+  }
+  // Each session's allowed window, for the consolidation pass further down.
+  const entryWindow = new Map<ScheduleEntry, { start: number; end: number }>();
+
   // ── Collect schedulable rows: must have courseCode + credits > 0 ─────────
   const courseRows = assignments.filter(a => a.courseCode.trim() && a.credits > 0);
   const totalSessions = courseRows.reduce((s, a) => s + a.credits, 0);
+  const windowedRows = new Set<CourseAssignment>(cohortWindow.size === 0 ? [] :
+    courseRows.filter(a => a.cohorts.some(c => { const g = findGroup(c); return !!g && cohortWindow.has(g.id); })));
+  const hasCohortWindow = (a: CourseAssignment) => windowedRows.has(a);
 
   // Sort order (most constrained → least constrained):
   // 1. Course-Day-Block courses first — they have the fewest candidate slots so must
@@ -572,6 +624,10 @@ export async function runAutoScheduler(
     const aDB = a.courseDayBlock.trim() ? 0 : 1;
     const bDB = b.courseDayBlock.trim() ? 0 : 1;
     if (aDB !== bDB) return aDB - bDB;
+    // Rows limited to a half-day window have fewer slots, so they pick first.
+    const aW = hasCohortWindow(a) ? 0 : 1;
+    const bW = hasCohortWindow(b) ? 0 : 1;
+    if (aW !== bW) return aW - bW;
     const al = a.category.toLowerCase() === 'lab' ? 0 : 1;
     const bl = b.category.toLowerCase() === 'lab' ? 0 : 1;
     if (al !== bl) return al - bl;
@@ -622,7 +678,48 @@ export async function runAutoScheduler(
       continue;
     }
 
-    const dayKey = `${asgn.facultyId}::${asgn.courseCode}::${[...asgn.cohorts].sort().join(',')}`;
+    // Daily window = faculty hours, narrowed by every cohort's own window.
+    const facStart = asgn.timeStart || 8;
+    const facEnd   = asgn.timeEnd   || 16;
+    let winStart = facStart, winEnd = facEnd;
+    let cohortWin: { start: number; end: number } | null = null;
+    for (const g of groups) {
+      const w = cohortWindow.get(g.id);
+      if (!w) continue;
+      cohortWin = cohortWin
+        ? { start: Math.max(cohortWin.start, w.start), end: Math.min(cohortWin.end, w.end) }
+        : { ...w };
+    }
+    if (cohortWin) {
+      winStart = Math.max(winStart, cohortWin.start);
+      winEnd   = Math.min(winEnd,   cohortWin.end);
+      if (winEnd - winStart < duration) {
+        unresolved.push({
+          courseCode:      asgn.courseCode,
+          courseName:      asgn.courseName,
+          facultyId:       asgn.facultyId,
+          facultyName:     asgn.facultyName,
+          cohorts:         asgn.cohorts,
+          category:        asgn.category,
+          sessionsNeeded,
+          sessionsPlaced:  0,
+          reason:          `Cohort window ${fmtHour(cohortWin.start)}–${fmtHour(cohortWin.end)} and faculty hours ` +
+                           `${fmtHour(facStart)}–${fmtHour(facEnd)} leave no room for a ${duration}-hour session — ` +
+                           `widen CohortTimeStart/End or FacultyTimeStart/End`,
+          windowTooNarrow: true,
+        });
+        continue;
+      }
+    }
+
+    // A half-day cohort doesn't need a lunch break at the edge of its window —
+    // a 13:00–18:00 cohort eats before it arrives, an 8:00–13:00 one after it leaves.
+    // Only lunch hours strictly inside the window are kept free.
+    const effLunch = cohortWin
+      ? lunchHours.filter(h => h > cohortWin!.start && h + 1 < cohortWin!.end)
+      : lunchHours;
+
+    const dayKey =`${asgn.facultyId}::${asgn.courseCode}::${[...asgn.cohorts].sort().join(',')}`;
     if (!usedDays.has(dayKey)) usedDays.set(dayKey, new Set());
     const takenDays = usedDays.get(dayKey)!;
 
@@ -637,7 +734,7 @@ export async function runAutoScheduler(
     let placed = 0;
     let rejFaculty = 0, rejCohort = 0, rejConsec = 0, rejFixedRoom = 0, rejNoRoom = 0;
     const rawCandidates = candidateDays.flatMap(day => {
-      let daySlots = buildSlots(asgn.timeStart || 8, asgn.timeEnd || 16, duration);
+      let daySlots = buildSlots(winStart, winEnd, duration);
       if (allowedHours) daySlots = daySlots.filter(sl => allowedHours.has(parseInt(sl.startTime)));
       // Labs without an explicit courseTimeBlock are restricted to even start hours
       // (8,10,12,14,16,18) so sessions pack as 8-10, 10-12, 14-16, 16-18 with no
@@ -722,7 +819,7 @@ export async function runAutoScheduler(
       markBusy(roomOcc, pickedRoom.id, keys);
       takenDays.add(day);
 
-      entries.push({
+      const entry = {
         id:           `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         termId,
         courseId:     course?.id   ?? null,
@@ -735,7 +832,9 @@ export async function runAutoScheduler(
         departmentId: faculty?.department || course?.department || 'General',
         weeks,
         category:     asgn.category,
-      } as ScheduleEntry);
+      } as ScheduleEntry;
+      entries.push(entry);
+      if (cohortWin) entryWindow.set(entry, { start: winStart, end: winEnd });
 
       placed++;
       onProgress(entries.length, totalSessions, `${asgn.courseCode} · ${asgn.cohorts[0] ?? ''}`);
@@ -752,8 +851,8 @@ export async function runAutoScheduler(
 
       if (faculty && !isFree(facultyOcc, faculty.id, keys)) { rejFaculty++; continue; }
       if (groups.some(g => !isFree(cohortOcc, g.id, keys))) { rejCohort++; continue; }
-      if (groups.some(g => !leavesLunchFree(cohortOcc, g.id, day, lunchHours, keys))) { rejCohort++; continue; }
-      if (groups.some(g => wouldCreateLargeGap(cohortOcc, g.id, day, keys, 2, lunchHours))) { rejCohort++; continue; }
+      if (effLunch.length > 0 && groups.some(g => !leavesLunchFree(cohortOcc, g.id, day, effLunch, keys))) { rejCohort++; continue; }
+      if (groups.some(g => wouldCreateLargeGap(cohortOcc, g.id, day, keys, 2, effLunch))) { rejCohort++; continue; }
       if (!isLab && faculty && wouldCreateLongRun(facultyNonLabOcc, faculty.id, day, keys)) { rejConsec++; continue; }
 
       const pickedRoom = pickRoomFor(keys);
@@ -768,7 +867,7 @@ export async function runAutoScheduler(
 
     if (placed < sessionsNeeded) {
       const diag = buildDiagnostics(
-        asgn, candidates.length,
+        { ...asgn, timeStart: winStart, timeEnd: winEnd }, candidates.length,
         rejFaculty, rejCohort, rejConsec, rejFixedRoom, rejNoRoom,
         placed, sessionsNeeded,
       );
@@ -845,7 +944,9 @@ export async function runAutoScheduler(
 
       let moved = false;
       outer: for (const tDay of targetDays) {
-        for (const { startTime, endTime } of buildSlots(8, 19, durH)) {
+        // A session from a time-windowed cohort may only move within that window.
+        const win = entryWindow.get(entry);
+        for (const { startTime, endTime } of buildSlots(win ? win.start : 8, win ? win.end : 19, durH)) {
           const newKeys = slotKeys(tDay, startTime, endTime);
 
           if (entry.facultyId && !isFree(facultyOcc, entry.facultyId, newKeys)) continue;
@@ -917,6 +1018,8 @@ export async function runAutoScheduler(
 // 32:FacultyWorkingDays  33:FacultyTimeStart  34:FacultyTimeEnd
 // 35:CohortLunchStart — "13" fixes lunch every day; "12-14" rotates the lunch
 //   hour across the week (Mon=12, Tue=13, Wed=12, ...) for extra packing flexibility
+// 36:CohortTimeStart  37:CohortTimeEnd — daily window for the row's cohorts
+//   (e.g. Sem 2 = 8 to 13, Sem 4 = 13 to 18 so the two never overlap). Optional.
 
 function _row(
   facultyId: string, facultyName: string, school: string,
@@ -928,6 +1031,7 @@ function _row(
   facultyBlockDay: string, facultyBlockTime: string,
   cohortBlockDay: string, cohortBlockTime: string,
   workingDays: string, timeStart: string, timeEnd: string, lunchStart: string,
+  cohortTimeStart = '', cohortTimeEnd = '',
 ): string {
   const c = [...cohorts, ...Array(12).fill('')].slice(0, 12);
   const vals = [
@@ -939,6 +1043,7 @@ function _row(
     facultyBlockDay, facultyBlockTime,
     cohortBlockDay, cohortBlockTime,
     workingDays, timeStart, timeEnd, lunchStart,
+    cohortTimeStart, cohortTimeEnd,
   ];
   // Wrap values containing commas in double-quotes (standard CSV escaping)
   return vals.map(v => v.includes(',') ? `"${v}"` : v).join(',');
@@ -951,7 +1056,8 @@ const _HDR =
   'Explo-Day-Block,Explo-Time-Block,' +
   'Course-Day-Block,Course-Time-Block,' +
   'FacultyBlockDay,FacultyBlockTime,CohortBlockDay,CohortBlockTime,' +
-  'FacultyWorkingDays,FacultyTimeStart,FacultyTimeEnd,CohortLunchStart';
+  'FacultyWorkingDays,FacultyTimeStart,FacultyTimeEnd,CohortLunchStart,' +
+  'CohortTimeStart,CohortTimeEnd';
 
 export const COURSE_TEMPLATE_CSV = [
   _HDR,
@@ -1006,6 +1112,17 @@ export const COURSE_TEMPLATE_CSV = [
     ['CS-Y3-A'], '','','','1',
     '','', '','', '','', '','',
     'Mon-Fri','8','16','12-14'),
+  // Half-day semesters — Sem 2 cohort only 8:00–13:00, Sem 4 cohort only 13:00–18:00,
+  // so the two timetables never overlap even with the same faculty and rooms.
+  // Filling the window on one row is enough; it applies to that cohort on every row.
+  _row('600001','John Smith','School of Engineering','CS201','Programming II','3','Theory','K1',
+    ['CS-SEM2-A'], '','','','2',
+    '','', '','', '','', '','',
+    'Mon-Fri','8','18','13', '8','13'),
+  _row('600001','John Smith','School of Engineering','CS401','Operating Systems','3','Theory','K1',
+    ['CS-SEM4-A'], '','','','4',
+    '','', '','', '','', '','',
+    'Mon-Fri','8','18','13', '13','18'),
 ].join('\n');
 
 export const ROOM_CAMPUS_TEMPLATE_CSV = [

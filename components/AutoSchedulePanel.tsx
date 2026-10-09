@@ -11,6 +11,7 @@ import {
   type UnresolvedSession,
   type RoomlessSession,
   type SchedulerResult,
+  parseClockHour,
 } from '../utils/autoScheduler';
 
 interface Props {
@@ -37,6 +38,7 @@ function downloadCSV(filename: string, content: string) {
 
 function getErrorCategory(u: UnresolvedSession): string {
   if (u.facultyNotFound) return 'Faculty ID Not Found';
+  if (u.windowTooNarrow) return 'Cohort Time Window Too Narrow';
   const d = u.diagnostics;
   if (!d) return 'No Viable Slot';
   if (u.sessionsPlaced > 0 && u.sessionsPlaced < u.sessionsNeeded) return 'Partial Placement';
@@ -135,6 +137,8 @@ const COLS: [string, string, string, string, string][] = [
   ['FacultyTimeStart',   '8 or 10 (faculty roster)',   '#64748b', '#f8fafc', '#e2e8f0'],
   ['FacultyTimeEnd',     '16 or 18 (faculty roster)',  '#64748b', '#f8fafc', '#e2e8f0'],
   ['CohortLunchStart',   '13 (fixed) or "12-14" (rotates per day)', '#64748b', '#f8fafc', '#e2e8f0'],
+  ['CohortTimeStart',    'cohort day starts e.g. 8 (Sem 2) or 13 (Sem 4)', '#0f766e', '#f0fdfa', '#99f6e4'],
+  ['CohortTimeEnd',      'cohort day ends e.g. 13 (Sem 2) or 18 (Sem 4)',  '#0f766e', '#f0fdfa', '#99f6e4'],
 ];
 
 const STEP_GRADS = [
@@ -192,6 +196,26 @@ const AutoSchedulePanel: React.FC<Props> = ({
 
   const activeTerm = terms.find(t => t.id === activeTermId);
 
+  // Summary of CohortTimeStart/End found in the uploaded file, e.g.
+  // "08:00–13:00 (12 cohorts) · 13:00–18:00 (9 cohorts)", so a typo is easy to spot.
+  const cohortWindows = useMemo(() => {
+    const fmt = (h: number) => `${String(Math.floor(h)).padStart(2, '0')}:${h % 1 ? '30' : '00'}`;
+    const byCohort = new Map<string, { start: number; end: number }>();
+    for (const a of assignments) {
+      if (a.cohortTimeStart == null && a.cohortTimeEnd == null) continue;
+      for (const c of a.cohorts) {
+        const prev = byCohort.get(c) ?? { start: 0, end: 24 };
+        byCohort.set(c, { start: Math.max(prev.start, a.cohortTimeStart ?? 0), end: Math.min(prev.end, a.cohortTimeEnd ?? 24) });
+      }
+    }
+    const byLabel = new Map<string, string[]>();
+    byCohort.forEach((w, c) => {
+      const label = `${fmt(w.start)}–${fmt(w.end)}`;
+      byLabel.set(label, [...(byLabel.get(label) ?? []), c]);
+    });
+    return Array.from(byLabel, ([label, cohorts]) => ({ label, cohorts }));
+  }, [assignments]);
+
   const parseCourseFile = useCallback((file: File) => {
     setParseError('');
     Papa.parse(file, {
@@ -225,6 +249,8 @@ const AutoSchedulePanel: React.FC<Props> = ({
           timeStart:      parseInt(r.FacultyTimeStart) || defStart,
           timeEnd:        parseInt(r.FacultyTimeEnd)   || defEnd,
           lunchStart:     (r.CohortLunchStart || '').trim() || String(defLunch),
+          cohortTimeStart: parseClockHour(r.CohortTimeStart),
+          cohortTimeEnd:   parseClockHour(r.CohortTimeEnd),
         })).filter(a => a.facultyId);
         if (!parsed.length) { setParseError('No valid rows — check column headers match template'); return; }
         setAssignments(parsed); setCourseFileName(file.name); setResult(null); setIsApplied(false);
@@ -335,7 +361,7 @@ const AutoSchedulePanel: React.FC<Props> = ({
                 </button>
               </div>
               <p className="text-[9px] text-[#4338ca] leading-relaxed bg-[#eef2ff] border border-[#c7d2fe] px-2 py-1.5">
-                Leave <strong>FacultyWorkingDays</strong> blank to use the default days set in Step 3. Explicit "Mon-Fri" or "Tue-Sat" values are always respected. <strong>PreferredRooms</strong>: "R1|R2" pipe-separated. Block columns accept pipe-sep days/hours. Faculty max 2 consecutive hours (4-hr labs exempt). <strong>CohortLunchStart</strong>: "13" fixes lunch every day; "12-14" rotates lunch across Mon→Sat (e.g. Mon=12, Tue=13) for extra packing flexibility.
+                Leave <strong>FacultyWorkingDays</strong> blank to use the default days set in Step 3. Explicit "Mon-Fri" or "Tue-Sat" values are always respected. <strong>PreferredRooms</strong>: "R1|R2" pipe-separated. Block columns accept pipe-sep days/hours. Faculty max 2 consecutive hours (4-hr labs exempt). <strong>CohortLunchStart</strong>: "13" fixes lunch every day; "12-14" rotates lunch across Mon→Sat (e.g. Mon=12, Tue=13) for extra packing flexibility. <strong>CohortTimeStart / CohortTimeEnd</strong> (optional): keeps a cohort's classes inside that part of the day — e.g. Sem 2 = 8 to 13, Sem 4 = 13 to 18 so the two never overlap. Fill it once per cohort; it applies to every row with that cohort. FacultyTimeStart/End must also cover the window.
               </p>
             </div>
           </div>
@@ -360,6 +386,11 @@ const AutoSchedulePanel: React.FC<Props> = ({
                     <div className="flex-1 min-w-0">
                       <p className="text-[9px] font-black text-[#7c3aed] truncate">{courseFileName}</p>
                       <p className="text-[8px] text-[#a855f7]">{assignments.length} assignments ready</p>
+                      {cohortWindows.length > 0 && (
+                        <p className="text-[8px] text-[#0f766e] font-bold mt-0.5" title={cohortWindows.map(w => `${w.label}: ${w.cohorts.join(', ')}`).join('\n')}>
+                          Cohort time windows: {cohortWindows.map(w => `${w.label} (${w.cohorts.length} cohort${w.cohorts.length === 1 ? '' : 's'})`).join(' · ')}
+                        </p>
+                      )}
                     </div>
                     <button onClick={() => { setCourseFileName(''); setAssignments([]); setResult(null); }} className="p-1 text-[#7c3aed] hover:bg-[#ede9fe]">
                       <X className="w-3 h-3" />
