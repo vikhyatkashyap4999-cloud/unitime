@@ -23,7 +23,7 @@ interface SessionModalProps {
 }
 
 const PREDEFINED_CATEGORIES = [
-  'Explo', 'meeting', 'Theory', 'LAB', 'Online Class', 'Tut', 'Minor', 'Elective', 'Hons', 'PE1', 'PE2', 'PE3', 'Mid Sem Sub'
+  'Explo', 'meeting', 'Theory', 'Extra-Theory', 'LAB', 'Online Class', 'Tut', 'Minor', 'Elective', 'Hons', 'PE1', 'PE2', 'PE3', 'Mid Sem Sub'
 ];
 
 const SessionModal: React.FC<SessionModalProps> = ({

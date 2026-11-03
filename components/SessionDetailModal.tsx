@@ -165,6 +165,7 @@ const SessionDetailModal: React.FC<SessionDetailModalProps> = ({
                       { id: 'Explo', name: 'Explo' },
                       { id: 'meeting', name: 'meeting' },
                       { id: 'Theory', name: 'Theory' },
+                      { id: 'Extra-Theory', name: 'Extra-Theory' },
                       { id: 'LAB', name: 'LAB' },
                       { id: 'Online Class', name: 'Online Class' },
                       { id: 'Tut', name: 'Tut' },
