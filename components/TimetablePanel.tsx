@@ -88,6 +88,9 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
   const [resizeDir, setResizeDir] = useState<string | null>(null);
   const [selectedWeeks, setSelectedWeeks] = useState<number[]>(Array.from({ length: TOTAL_WEEKS }, (_, i) => i + 1));
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
+  // Each time the picker opens, the first pick replaces what is shown (a fresh
+  // filter); further picks in the same opening are added to it.
+  const freshPick = useRef(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, entry?: ScheduleEntry, cell?: { day: DayOfWeek, time: string } } | null>(null);
   const [dragEntry, setDragEntry] = useState<ScheduleEntry | null>(null);
@@ -459,7 +462,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
               <button 
                 onClick={() => {
                   setIsSelectorOpen(!isSelectorOpen);
-                  if (!isSelectorOpen) setSearchQuery(''); // Clear search when opening
+                  if (!isSelectorOpen) { setSearchQuery(''); freshPick.current = true; } // Clear search when opening
                 }} 
                 className="w-full bg-white text-black border border-[#ccc] px-2 py-0.5 text-xs font-bold hover:bg-[#e6e6e6] transition-all flex justify-between items-center gap-2 max-h-[22px]"
               >
@@ -492,9 +495,12 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                         onChange={(e) => {
                           const filteredIds = resourceOptions.map(o => o.id);
                           if (e.target.checked) {
-                            const merged = [...new Set([...selectedIds, ...filteredIds])];
+                            const base = freshPick.current ? [] : selectedIds;
+                            freshPick.current = false;
+                            const merged = [...new Set([...base, ...filteredIds])];
                             onUpdateView?.(viewType, merged.join(','));
                           } else {
+                            freshPick.current = false;
                             const filteredSet = new Set(filteredIds);
                             onUpdateView?.(viewType, selectedIds.filter(i => !filteredSet.has(i)).join(','));
                           }
@@ -504,7 +510,7 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                     </label>
                     {selectedIds.length > 0 && (
                       <button
-                        onClick={() => { onUpdateView?.(viewType, ''); setSearchQuery(''); }}
+                        onClick={() => { onUpdateView?.(viewType, ''); setSearchQuery(''); freshPick.current = false; }}
                         className="text-[10px] font-bold text-[#ac2925] hover:underline"
                       >
                         Clear
@@ -524,9 +530,11 @@ const TimetablePanel: React.FC<TimetablePanelProps> = ({
                             className="w-3.5 h-3.5 shrink-0 accent-[#185baf]"
                             checked={selectedIds.includes(opt.id)}
                             onChange={() => {
+                              const fresh = freshPick.current;
+                              freshPick.current = false;
                               const newIds = selectedIds.includes(opt.id)
                                 ? selectedIds.filter(i => i !== opt.id)
-                                : [...selectedIds, opt.id];
+                                : fresh ? [opt.id] : [...selectedIds, opt.id];
                               onUpdateView?.(viewType, newIds.join(','));
                             }}
                           />
